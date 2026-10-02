@@ -1,0 +1,17 @@
+name: Local Supabase
+description: Start the local Supabase stack with migrations and seed applied, and export its connection details.
+runs:
+  using: composite
+  steps:
+    - name: Start Supabase
+      shell: bash
+      run: pnpm exec supabase start -x studio,imgproxy,logflare,vector,supavisor,postgres-meta
+    - name: Export connection details
+      shell: bash
+      run: |
+        status="$(pnpm exec supabase status -o json)"
+        {
+          echo "NEXT_PUBLIC_SUPABASE_URL=$(jq -r '.API_URL' <<<"$status")"
+          echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(jq -r '.PUBLISHABLE_KEY // .ANON_KEY' <<<"$status")"
+          echo "DATABASE_URL=$(jq -r '.DB_URL' <<<"$status")"
+        } >> "$GITHUB_ENV"

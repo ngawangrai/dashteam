@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  supabase: true
+minimumReleaseAgeExclude:
+  - '@types/node@24.19.1'

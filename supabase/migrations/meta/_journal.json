@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1790932381245,
+      "tag": "20261002091300_is_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790932381675,
+      "tag": "20261002091301_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790932404468,
+      "tag": "20261002091324_auth_hooks",
+      "breakpoints": true
+    }
+  ]
+}

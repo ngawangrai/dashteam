@@ -1,0 +1,52 @@
+name: Migrate
+
+# Applies new migrations after a reviewed merge: staging first, then production with approval.
+on:
+  push:
+    branches: [main]
+    paths: [supabase/migrations/**]
+  workflow_dispatch:
+
+concurrency:
+  group: migrate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm exec supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ secrets.STAGING_PROJECT_REF }}
+          DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+      - run: pnpm exec supabase db push --password "$DB_PASSWORD"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.STAGING_DB_PASSWORD }}
+
+  production:
+    needs: staging
+    runs-on: ubuntu-latest
+    # The production environment requires the merge owner's approval before this job runs.
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm exec supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ secrets.PROD_PROJECT_REF }}
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+      - run: pnpm exec supabase db push --password "$DB_PASSWORD"
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
