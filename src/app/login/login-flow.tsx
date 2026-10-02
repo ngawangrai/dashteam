@@ -13,7 +13,7 @@ const CODE_LENGTH = 6;
 const fieldClass =
   "min-h-11 w-full rounded-control bg-surface px-3 text-body text-label placeholder:text-label-secondary aria-invalid:outline-2 aria-invalid:outline-danger";
 
-export function LoginFlow() {
+export function LoginFlow({ notice = null }: { notice?: string | null }) {
   const [sendState, sendAction, isSending] = useActionState<SendCodeState, FormData>(sendSignInCode, { status: "idle" });
   const [resendState, resendAction, isResending] = useActionState<SendCodeState, FormData>(sendSignInCode, { status: "idle" });
   const [verifyState, verifyAction, isVerifying] = useActionState<VerifyCodeState, FormData>(verifySignInCode, { status: "idle" });
@@ -46,7 +46,8 @@ export function LoginFlow() {
   }
 
   if (!onCodeStep) {
-    const error = sendState.status === "error" ? sendState.message : null;
+    // Shown once after being signed out because access ended; replaced by anything newer.
+    const error = sendState.status === "error" ? sendState.message : notice;
     return (
       // Animates only when coming back from the code step, never on first load.
       <div key="email" className={`flex flex-col gap-6 ${editingEmail ? "step-enter [--step-from:-16px]" : ""}`}>

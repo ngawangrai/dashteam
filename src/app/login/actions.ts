@@ -2,9 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { homePathFor } from "@/lib/auth/roles";
-import { roleFor } from "@/lib/auth/session";
+import { accessFrom, sessionInfoFor } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { sendCodeErrorMessage, verifyCodeErrorMessage } from "./messages";
+import { NOT_SET_UP_MESSAGE, accessEndedMessage, sendCodeErrorMessage, verifyCodeErrorMessage } from "./messages";
 import { codeSchema, emailSchema, type SendCodeState, type VerifyCodeState } from "./schema";
 
 export async function sendSignInCode(_previous: SendCodeState, formData: FormData): Promise<SendCodeState> {
@@ -34,11 +34,14 @@ export async function verifySignInCode(_previous: VerifyCodeState, formData: For
     return { status: "error", message: verifyCodeErrorMessage(error?.code) };
   }
 
-  const role = await roleFor(data.user.id);
-  if (!role) {
+  // A valid code is not enough: people whose employment has ended no longer have access.
+  const info = await sessionInfoFor(data.user.id);
+  const access = info ? accessFrom(info) : "not_set_up";
+  if (!info || access !== "ok") {
     await supabase.auth.signOut();
-    return { status: "error", message: "Your account isn’t fully set up yet. Ask your admin to check it." };
+    const message = access === "ended" && info?.end_date ? accessEndedMessage(info.end_date) : NOT_SET_UP_MESSAGE;
+    return { status: "error", message };
   }
 
-  redirect(homePathFor(role));
+  redirect(homePathFor(info.role));
 }

@@ -13,6 +13,14 @@ export function sendCodeErrorMessage(code: string | undefined): string {
   }
 }
 
+import { formatLongDate } from "@/lib/format";
+
+export const NOT_SET_UP_MESSAGE = "Your account isn’t fully set up yet. Ask your admin to check it.";
+
+export function accessEndedMessage(endDate: string): string {
+  return `Your DashTeam access ended on ${formatLongDate(endDate)}. For payslips or letters, ask your admin.`;
+}
+
 export function verifyCodeErrorMessage(code: string | undefined): string {
   switch (code) {
     // Supabase returns otp_expired for a wrong code as well as an old one.

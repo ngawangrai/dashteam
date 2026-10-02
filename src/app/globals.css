@@ -15,6 +15,7 @@
   --color-label-secondary: #6c6c70;
   --color-separator: #c6c6c8;
   --color-fill: #f0f0f5;
+  --color-segment: #ffffff;
   --color-accent: #0a66d8;
   --color-accent-fill: #0a66d8;
   --color-on-accent: #ffffff;
@@ -32,6 +33,7 @@
     --color-label-secondary: #a1a1a6;
     --color-separator: #38383a;
     --color-fill: #2c2c2e;
+    --color-segment: #636366;
     --color-accent: #4c9aff;
     --color-accent-fill: #1d6bd3;
     --color-on-accent: #ffffff;
@@ -53,6 +55,7 @@
   --color-label-secondary: var(--color-label-secondary);
   --color-separator: var(--color-separator);
   --color-fill: var(--color-fill);
+  --color-segment: var(--color-segment);
   --color-accent: var(--color-accent);
   --color-accent-fill: var(--color-accent-fill);
   --color-on-accent: var(--color-on-accent);
@@ -147,7 +150,85 @@
   }
 }
 
+/* A revealed value fades in where the masked one was. */
+@utility reveal {
+  transition: opacity 200ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/*
+ * Bottom sheet (native <dialog>). Rises from the bottom edge, where it returns when closed;
+ * enters on the spring, leaves faster. On wider screens it is a centred card instead.
+ */
+.sheet {
+  margin: auto auto 0;
+  width: 100%;
+  max-width: 32rem;
+  max-height: calc(100dvh - 2.5rem);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--color-surface);
+  color: var(--color-label);
+  transform: translateY(0);
+  transition:
+    transform 300ms var(--ease-spring),
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+  @starting-style {
+    transform: translateY(100%);
+  }
+}
+.sheet:not([open]) {
+  transform: translateY(100%);
+  transition-duration: 200ms;
+  transition-timing-function: var(--ease-out);
+}
+.sheet::backdrop {
+  background: rgb(0 0 0 / 0.32);
+  opacity: 1;
+  transition:
+    opacity 250ms var(--ease-out),
+    overlay 250ms allow-discrete,
+    display 250ms allow-discrete;
+  @starting-style {
+    opacity: 0;
+  }
+}
+.sheet:not([open])::backdrop {
+  opacity: 0;
+}
+@media (min-width: 48rem) {
+  .sheet {
+    margin: auto;
+    border-radius: var(--radius-card);
+    @starting-style {
+      transform: translateY(1rem);
+      opacity: 0;
+    }
+  }
+  .sheet:not([open]) {
+    transform: translateY(1rem);
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet:not([open]) {
+    transform: none;
+    transition-property: opacity, overlay, display;
+    @starting-style {
+      transform: none;
+      opacity: 0;
+    }
+  }
+  .sheet:not([open]) {
+    opacity: 0;
+  }
+  .reveal {
+    transition: none;
+  }
   .pressable:active:not(:disabled) {
     transform: none;
   }

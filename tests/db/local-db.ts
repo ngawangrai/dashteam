@@ -43,3 +43,36 @@ export function as<T>(userId: string | null, run: (tx: postgres.TransactionSql) 
     return run(tx);
   });
 }
+
+export const SEEDED_EMPLOYEE_PERSON_ID = "33333333-3333-4333-8333-333333333333";
+
+/** Switches an open transaction to a signed-in person (or back to the database owner with null). */
+export async function actAs(tx: postgres.TransactionSql, userId: string | null): Promise<void> {
+  if (userId === null) {
+    await tx`select set_config('role', 'postgres', true)`;
+    return;
+  }
+  await tx`select set_config('request.jwt.claims', ${JSON.stringify({ sub: userId, role: "authenticated" })}, true),
+                  set_config('request.jwt.claim.sub', ${userId}, true),
+                  set_config('role', 'authenticated', true)`;
+}
+
+/** Runs and commits as a signed-in person, returning the transaction id (for undo tests). */
+export async function committedAs<T>(
+  userId: string,
+  run: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<{ result: T; transactionId: number }> {
+  let transactionId = 0;
+  const result = await sql.begin(async (tx) => {
+    await actAs(tx, userId);
+    const value = await run(tx);
+    const [row] = await tx<{ id: string }[]>`select txid_current()::text as id`;
+    transactionId = Number(row?.id);
+    return value;
+  });
+  return { result: result as T, transactionId };
+}
+
+export function uniqueEmail(label: string): string {
+  return `${label}.${Date.now()}.${Math.floor(Math.random() * 1e6)}@dashteam.local`;
+}

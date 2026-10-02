@@ -12,3 +12,11 @@ where email in ('admin@dashteam.local', 'employee@dashteam.local');
 
 -- The auth.users trigger created both profiles as employees; promote the admin.
 update public.profiles set role = 'admin' where id = '11111111-1111-4111-8111-111111111111';
+
+-- The employee's person record and pay. Without a person record a non-admin has no access.
+-- No bank details or TPN: those are encrypted by the app, so they are added through the app.
+insert into public.people (id, profile_id, full_name, email, phone, start_date)
+values ('33333333-3333-4333-8333-333333333333', '22222222-2222-4222-8222-222222222222', 'Sonam Wangmo', 'employee@dashteam.local', '17112233', '2025-03-03');
+
+insert into public.pay_records (person_id, effective_from, employment_type, basic_ch, allowances_ch, note)
+values ('33333333-3333-4333-8333-333333333333', '2025-03-01', 'full_time', 4000000, 500000, 'Joining pay');

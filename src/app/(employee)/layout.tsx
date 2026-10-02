@@ -1,14 +1,13 @@
 import type { ReactNode } from "react";
-import { AppBar } from "@/components/app-bar";
+import { AppShell } from "@/components/app-shell";
 import { requireUser } from "@/lib/auth/session";
 
-// Every signed-in person can open their own home, admins included: the admin delegate may also take leave.
+// Every signed-in person with access can open their own home and profile, admins included.
 export default async function EmployeeLayout({ children }: { children: ReactNode }) {
-  await requireUser();
+  const user = await requireUser();
   return (
-    <div className="[--page-width:32rem]">
-      <AppBar />
+    <AppShell user={user} width="narrow">
       {children}
-    </div>
+    </AppShell>
   );
 }

@@ -51,6 +51,10 @@ describe.each([
     expect(contrast(tokens["on-accent"] ?? "", tokens["accent-fill"] ?? "")).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("text on a selected segment stays readable", () => {
+    expect(contrast(tokens.label ?? "", tokens.segment ?? "")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("text on the input fill stays readable", () => {
     expect(contrast(tokens.label ?? "", tokens.fill ?? "")).toBeGreaterThanOrEqual(4.5);
     expect(contrast(tokens["label-secondary"] ?? "", tokens.fill ?? "")).toBeGreaterThanOrEqual(4.5);

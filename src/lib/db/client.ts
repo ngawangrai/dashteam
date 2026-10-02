@@ -15,7 +15,7 @@ if (process.env.NODE_ENV !== "production") globalForDb.dashteamSql = client;
 
 const baseDb = drizzle(client, { schema });
 
-type Tx = Parameters<Parameters<typeof baseDb.transaction>[0]>[0];
+export type Tx = Parameters<Parameters<typeof baseDb.transaction>[0]>[0];
 
 /**
  * Runs queries as the signed-in person so Postgres RLS applies, exactly as it would

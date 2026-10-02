@@ -1,26 +1,9 @@
-import { expect, type Page, test } from "@playwright/test";
-import { latestSignInCode } from "./mailpit";
+import { expect, test } from "@playwright/test";
+import { expectNoSideways, signIn, signOut } from "./helpers";
 
 // Matches supabase/seed.sql.
 const ADMIN = { email: "admin@dashteam.local", firstName: "Tashi" };
 const EMPLOYEE = { email: "employee@dashteam.local", firstName: "Sonam" };
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  // Mailpit timestamps are in whole seconds; allow for that and for clock skew.
-  const sentAfter = new Date(Date.now() - 2_000);
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
-  const code = await latestSignInCode(email, sentAfter);
-  // Typing the sixth digit submits on its own, as it does when iOS fills the code from Mail.
-  await page.getByLabel("Code").fill(code);
-}
-
-async function expectNoSideways(page: Page) {
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(overflow).toBeLessThanOrEqual(0);
-}
 
 test("signed-out visitors are sent to sign in", async ({ page }) => {
   for (const path of ["/", "/admin"]) {
@@ -57,8 +40,7 @@ test("an admin lands on the admin home", async ({ page }, testInfo) => {
 test("signing out ends the session", async ({ page }) => {
   await signIn(page, EMPLOYEE.email);
   await expect(page).toHaveURL(/\/$/);
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page).toHaveURL(/\/login$/);
+  await signOut(page);
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
 });

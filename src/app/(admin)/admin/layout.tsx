@@ -1,13 +1,12 @@
 import type { ReactNode } from "react";
-import { AppBar } from "@/components/app-bar";
+import { AppShell } from "@/components/app-shell";
 import { requireRole } from "@/lib/auth/session";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  await requireRole("admin");
+  const user = await requireRole("admin");
   return (
-    <div className="[--page-width:48rem]">
-      <AppBar />
+    <AppShell user={user} width="wide">
       {children}
-    </div>
+    </AppShell>
   );
 }

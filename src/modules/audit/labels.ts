@@ -1,0 +1,27 @@
+import "server-only";
+import { sql } from "drizzle-orm";
+import type { Tx } from "@/lib/db/client";
+
+// Audit entries are written by database triggers. The app only names the action, so the log
+// reads "person.exited" rather than "people.update". The label lasts until the transaction ends.
+
+export type AuditAction =
+  | "person.created"
+  | "person.updated"
+  | "person.exited"
+  | "pay.set"
+  | "pay.changed"
+  | "profile_change.requested"
+  | "profile_change.withdrawn"
+  | "profile_change.approved"
+  | "profile_change.declined";
+
+export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
+  await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);
+}
+
+/** The transaction id that ties this change's audit entries together, used to undo it. */
+export async function currentTransactionId(tx: Tx): Promise<number> {
+  const rows = await tx.execute<{ id: string }>(sql`select txid_current()::text as id`);
+  return Number(rows[0]?.id);
+}

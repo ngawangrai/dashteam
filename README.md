@@ -50,6 +50,9 @@ Functions, triggers and grants go in a custom migration: `pnpm exec drizzle-kit 
 
 - People sign in with a one-time email code. Accounts are **invite-only**: signups are off, so an unknown email can't create one
 - Every account has a `profiles` row with a role: `admin` or `employee`. Interns are employees; "intern" is an employment type (milestone 2)
+- People are added by an admin under **People**. Adding someone creates their sign-in for that email
+- Access ends the day after a person's last working day. They are signed out, can't sign in again, and RLS shows them nothing; the admin still sees their record
+- Every write to people, pay, change requests and roles is recorded in `audit_log` by database triggers. It can't be changed or removed, and any change can be undone for 10 minutes by whoever made it
 - `/admin` is protected three times: the admin layout and every admin page call `requireRole("admin")` on the server; the app's database client runs every query as the signed-in person, so Postgres RLS applies; and RLS itself lets employees read only their own rows
 - `src/proxy.ts` only refreshes the session and sends signed-out people to `/login`. It is not the security boundary
 
@@ -83,6 +86,8 @@ In the Supabase dashboard, region **Singapore**:
 2. Environment variables, from each Supabase project's **Connect** dialog:
    - **Preview** → staging values; **Production** → production values
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `DATABASE_URL` (transaction pooler, port 6543)
+   - `SUPABASE_SECRET_KEY` (Project Settings → API Keys; server only)
+   - `FIELD_ENCRYPTION_KEY`: `openssl rand -base64 32`, a **different key for staging and production**
 
 DashTeam uses no Vercel-only services (no Vercel Postgres, KV, Blob, Edge Config or Cron).
 
@@ -122,6 +127,14 @@ Settings → Environments: create `staging`, `production` and `backup`. They kee
 | `BACKUP_DATABASE_URL` | secret (backup) | backup. Production **session** pooler URL, port 5432 |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | secrets (backup) | backup |
 | `BACKUP_AGE_RECIPIENT` | variable (backup) | backup. The age **public** key only |
+
+## Encryption key
+
+TPN and bank account numbers are encrypted in the app with `FIELD_ENCRYPTION_KEY` before they reach the database. The database and every backup hold only ciphertext.
+
+- **Keep the production key in your password manager.** Without it, those fields can't be read, in the live database or in any backup.
+- Never change the key in place: existing values would become unreadable. Key rotation is part of milestone 8.
+- `pnpm env:local` generates a local key once and keeps it.
 
 ## Backups
 

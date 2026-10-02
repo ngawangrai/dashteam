@@ -14,6 +14,11 @@ export default tseslint.config(
     },
   },
   {
+    // CLAUDE.md hard rule 8: TPN and bank details must never reach a log, so the app does not log at all.
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "no-console": "error" },
+  },
+  {
     // CLAUDE.md hard rules 1 and 3: the payroll module is pure and holds no rates.
     // It imports only its own files, rules types and zod; every number it uses comes from the rules.
     files: ["src/modules/payroll/**/*.ts"],
