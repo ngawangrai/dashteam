@@ -38,6 +38,16 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm test
 
+  # Its own job so a broken DRC fixture or payroll test shows up by name (CLAUDE.md hard rule 5).
+  payroll:
+    name: payroll (DRC fixture)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm test:payroll
+
   db:
     name: db (RLS)
     runs-on: ubuntu-latest

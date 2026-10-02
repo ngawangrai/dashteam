@@ -22,6 +22,27 @@
       "when": 1790932404468,
       "tag": "20261002091324_auth_hooks",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790961250776,
+      "tag": "20261002171410_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790961251191,
+      "tag": "20261002171411_rules_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790961258877,
+      "tag": "20261002171418_v1_rules",
+      "breakpoints": true
     }
   ]
 }

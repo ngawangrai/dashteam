@@ -13,4 +13,31 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    // CLAUDE.md hard rules 1 and 3: the payroll module is pure and holds no rates.
+    // It imports only its own files, rules types and zod; every number it uses comes from the rules.
+    files: ["src/modules/payroll/**/*.ts"],
+    ignores: ["src/modules/payroll/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: "^(?!\\.{1,2}/|@/modules/rules/types$|zod$).*",
+              message: "modules/payroll may import only its own files, @/modules/rules/types and zod.",
+            },
+          ],
+        },
+      ],
+      // Any number other than 0, 1 or 2 (also as bigint) is a value that belongs in the rules.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[raw=/^(?!(?:0|1|2)n?$)[0-9.]/]",
+          message: "No numbers in modules/payroll: rates, bands and settings come from the rules (0, 1 and 2 are allowed).",
+        },
+      ],
+    },
+  },
 );
