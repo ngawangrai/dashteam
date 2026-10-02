@@ -61,7 +61,7 @@ Functions, triggers and grants go in a custom migration: `pnpm exec drizzle-kit 
 | Preview (every PR) | Supabase project `dashteam-staging` | Vercel preview URL |
 | Production | Supabase project `dashteam-prod` | Vercel production |
 
-Migrations reach staging and then production through `.github/workflows/migrate.yml` after a merge to `main`. The production step waits for the merge owner's approval.
+Migrations reach staging and then production through `.github/workflows/migrate.yml` on every push to `main` that changes `supabase/migrations`. Production runs only if staging succeeds.
 
 ### Setting up a hosted Supabase project (once per project)
 
@@ -101,19 +101,18 @@ Run that on any Node 24 host (a VPS, Fly.io, Render, Railway, or a container) wi
 
 ## GitHub
 
-### Protecting `main`
+### Day-to-day workflow
 
-Settings → Rules → Rulesets → New branch ruleset, target `main`:
+One person works on DashTeam for now, so changes go straight to `main`:
 
-- Require a pull request before merging, with 1 approval (the merge owner)
-- Require status checks to pass: `typecheck`, `lint`, `test`, `db (RLS)`, `e2e`
-- Block force pushes
+1. Work locally and run `pnpm typecheck && pnpm lint && pnpm test` (plus `pnpm test:db` and `pnpm test:e2e` when touching the database or screens)
+2. Commit and push to `main`. CI runs every check again and GitHub emails you if one fails; Vercel deploys to production
 
-On a **private** repository this is only enforced on a paid GitHub plan (Team or Pro).
+When a second person joins, add a branch ruleset on `main` that requires a pull request and these status checks: `typecheck`, `lint`, `test`, `db (RLS)`, `e2e`.
 
 ### Secrets and variables
 
-Settings → Environments: create `staging`, `production` (required reviewer: the merge owner) and `backup`.
+Settings → Environments: create `staging`, `production` and `backup`. They keep each set of secrets separate.
 
 | Name | Kind | Used by |
 | --- | --- | --- |

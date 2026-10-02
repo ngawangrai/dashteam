@@ -67,7 +67,7 @@ test("an email that isn't set up gets a clear next step", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("stranger@example.com");
   await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByRole("alert")).toContainText("Ask your admin to add you");
+  await expect(page.locator("#email-error")).toContainText("Ask your admin to add you");
 });
 
 test("a wrong code says what to do", async ({ page }, testInfo) => {
@@ -76,7 +76,8 @@ test("a wrong code says what to do", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await page.getByLabel("Code").fill("000000");
-  await expect(page.getByRole("alert")).toContainText("send a new code");
+  // Next.js renders its own empty role="alert" route announcer, so target the field error.
+  await expect(page.locator("#code-error")).toContainText("send a new code");
   await testInfo.attach("login-code-error", { body: await page.screenshot(), contentType: "image/png" });
 
   await page.getByRole("button", { name: "Use a different email" }).click();

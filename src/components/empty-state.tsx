@@ -12,7 +12,7 @@ export function EmptyState({ icon, title, message }: EmptyStateProps) {
     <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       <Icon icon={icon} size={32} className="text-label-secondary" />
       <div className="flex flex-col gap-1">
-        <p className="text-body font-semibold">{title}</p>
+        <p className="text-body font-semibold text-balance">{title}</p>
         <p className="text-secondary text-pretty text-label-secondary">{message}</p>
       </div>
     </div>

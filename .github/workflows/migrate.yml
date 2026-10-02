@@ -1,6 +1,6 @@
 name: Migrate
 
-# Applies new migrations after a reviewed merge: staging first, then production with approval.
+# Applies new migrations on push to main: staging first, and production only if staging succeeds.
 on:
   push:
     branches: [main]
@@ -35,7 +35,7 @@ jobs:
   production:
     needs: staging
     runs-on: ubuntu-latest
-    # The production environment requires the merge owner's approval before this job runs.
+    # Runs only after staging succeeds, so a broken migration never reaches salary data.
     environment: production
     timeout-minutes: 10
     steps:

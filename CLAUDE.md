@@ -92,7 +92,10 @@ Do not store the rounded monthly edges.
 
 ## Workflow
 
-- One milestone per branch and per PR, in this order:
+- One developer for now: commit straight to `main` and push. No pull requests, reviews or branch protection.
+  CI runs every check on each push to `main`; a failure there is fixed before anything else.
+  Add PRs and a branch ruleset on `main` when a second person starts contributing
+- Build one milestone at a time, finished before the next starts, in this order:
   0. Scaffold, auth, roles, CI, nightly encrypted backup job
   1. Rules engine + payroll calculation module (DRC fixture passes; no UI)
   2. Employee records and employment types
@@ -104,7 +107,8 @@ Do not store the rounded monthly edges.
   8. Hardening: audit log review, field encryption, tested backup restore
 - Start every feature in plan mode. Wait for approval of the plan before writing code
 - Write tests alongside the code, not after. Payroll logic is test-first
-- Keep PRs small enough to review in one sitting
+- Commit in small, working steps. Each commit passes `pnpm typecheck && pnpm lint && pnpm test`;
+  also run `pnpm test:db` and `pnpm test:e2e` when the change touches the database or screens
 - Never commit secrets. Use `.env.local`; keep `.env.example` current
 - If a requirement is unclear or the PRD is silent, ask. Do not guess on anything touching money, tax or filing
 
@@ -179,7 +183,7 @@ Before building or merging a screen, answer three questions:
 ## Do not
 
 - Add features outside the current milestone, or anything from "After V1" in the PRD
-- Add dependencies without saying why in the PR
+- Add dependencies without saying why in the commit message
 - Build multi-company or multi-tenant support
 - Change a past payroll month, the DRC fixture, or the audit log
 - Use em dashes in any user-facing copy
