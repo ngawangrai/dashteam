@@ -22,6 +22,7 @@
   --color-success: #157232;
   --color-warning: #9a5b00;
   --color-danger: #c4291c;
+  --color-on-danger: #ffffff;
   --color-bar: rgb(242 242 247 / 0.72);
 }
 
@@ -40,6 +41,7 @@
     --color-success: #3ccf6b;
     --color-warning: #ffb340;
     --color-danger: #ff6961;
+    --color-on-danger: #000000;
     --color-bar: rgb(0 0 0 / 0.72);
   }
 }
@@ -62,6 +64,7 @@
   --color-success: var(--color-success);
   --color-warning: var(--color-warning);
   --color-danger: var(--color-danger);
+  --color-on-danger: var(--color-on-danger);
   --color-bar: var(--color-bar);
 }
 
@@ -167,6 +170,8 @@
   width: 100%;
   max-width: 32rem;
   max-height: calc(100dvh - 2.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-radius: var(--radius-card) var(--radius-card) 0 0;
   background: var(--color-surface);
   color: var(--color-label);

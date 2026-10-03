@@ -7,8 +7,15 @@ import { Money } from "@/components/money";
 import { Page } from "@/components/page";
 import { PayRows } from "@/components/people/pay-rows";
 import { RequestCard } from "@/components/people/request-card";
+import { BalanceSummary } from "@/components/leave/balance-summary";
+import { ExitLeaveSettlement } from "@/components/leave/exit-settlement";
+import { LeaveList } from "@/components/leave/leave-list";
+import { RequestLeaveSheet } from "@/components/leave/request-sheet";
+import { firstNameFrom } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
-import { formatDate, formatMonth, formatPhone, monthOf } from "@/lib/format";
+import { enterLeaveFor } from "@/modules/leave/actions";
+import { balancesFor, exitLeaveFor, loadLeaveContext, sheetContextFor } from "@/modules/leave/repository";
+import { formatDate, formatMonth, formatPhone, monthOf, thimphuToday } from "@/lib/format";
 import { takeHomeFor } from "@/modules/people/estimate";
 import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
 import { getPersonDetail, rulesForMonth } from "@/modules/people/repository";
@@ -25,7 +32,11 @@ export default async function PersonPage({ params }: Params) {
   if (!detail) notFound();
 
   const { person, current, upcoming, pendingRequest } = detail;
-  const rules = await rulesForMonth(user);
+  const [rules, leave, exit] = await Promise.all([rulesForMonth(user), loadLeaveContext(user, person.id), exitLeaveFor(user, person.id)]);
+  const today = thimphuToday();
+  const sheet = leave ? sheetContextFor(leave) : null;
+  const firstName = firstNameFrom(person.fullName, person.email);
+  const recentLeave = leave ? [...leave.requests].reverse().slice(0, 5) : [];
   const takeHome = current && rules ? takeHomeFor(current, rules) : null;
   const type = (current ?? upcoming)?.employmentType;
   const subtitle = person.isCurrent
@@ -68,6 +79,37 @@ export default async function PersonPage({ params }: Params) {
         ) : null}
         {person.isCurrent ? <LinkRow href={`/admin/people/${person.id}/pay`} title="Change pay" /> : null}
       </InsetSection>
+
+      {exit.state !== "none" ? (
+        <ExitLeaveSettlement
+          personId={person.id}
+          firstName={firstName}
+          settlement={exit.settlement}
+          decided={exit.state === "decided" ? { status: exit.decision.status, finalCh: exit.decision.finalCh } : null}
+        />
+      ) : null}
+
+      {leave && leave.employmentType ? (
+        <>
+          <BalanceSummary lines={balancesFor(leave, Number(today.slice(0, 4)))} title="Leave" />
+          {recentLeave.length ? (
+            <InsetSection title="Recent leave">
+              <LeaveList requests={recentLeave} today={today} canCancelStarted />
+            </InsetSection>
+          ) : null}
+          {sheet && person.isCurrent ? (
+            <div className="flex justify-center">
+              <RequestLeaveSheet
+                context={{ ...sheet, today }}
+                action={enterLeaveFor.bind(null, person.id)}
+                forName={firstName}
+                triggerLabel={`Add leave for ${firstName}`}
+                triggerVariant="plain"
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <InsetSection title="Bank and tax">
         <InsetRow label="Bank">{person.bankName ?? "Not added"}</InsetRow>

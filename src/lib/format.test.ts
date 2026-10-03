@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDate, formatMonth, formatNu, formatPhone, maskedLast4, parseNu } from "./format";
+import { formatDate, formatDay, formatDays, formatMonth, formatNu, formatPhone, formatSpan, maskedLast4, parseNu } from "./format";
 
 describe("formatNu", () => {
   it.each([
@@ -56,5 +56,24 @@ describe("dates", () => {
 describe("maskedLast4", () => {
   it("shows only the last four", () => {
     expect(maskedLast4("1234")).toBe("••••1234");
+  });
+});
+
+describe("leave dates", () => {
+  it("names a day", () => {
+    expect(formatDay("2026-10-07")).toBe("Wed 7 Oct");
+    expect(formatDay("2026-10-07", { long: true })).toBe("Wednesday 7 October");
+  });
+
+  it("describes a span", () => {
+    expect(formatSpan("2026-10-07", "2026-10-07")).toBe("Wed 7 Oct");
+    expect(formatSpan("2026-10-07", "2026-10-09")).toBe("Wed 7 – Fri 9 Oct");
+    expect(formatSpan("2026-12-30", "2027-01-08")).toBe("Wed 30 Dec – Fri 8 Jan");
+  });
+
+  it("counts days in words, with halves", () => {
+    expect(formatDays(0.5)).toBe("½ day");
+    expect(formatDays(1)).toBe("1 day");
+    expect(formatDays(3.5)).toBe("3½ days");
   });
 });

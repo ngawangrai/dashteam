@@ -68,6 +68,33 @@ export function formatLongDate(date: PlainDate | string): string {
   return `${day} ${MONTHS[(month ?? 1) - 1] ?? ""} ${year}`;
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** 2026-10-07 → Wed 7 Oct */
+export function formatDay(date: PlainDate | string, options: { long?: boolean } = {}): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)).getUTCDay();
+  if (options.long) return `${WEEKDAYS_LONG[weekday]} ${day} ${MONTHS[(month ?? 1) - 1] ?? ""}`;
+  return `${WEEKDAYS[weekday]} ${day} ${MONTHS[(month ?? 1) - 1]?.slice(0, 3) ?? ""}`;
+}
+
+/** A leave span in words: "Wed 7 Oct", "Wed 7 – Fri 9 Oct", "Wed 30 Dec – Fri 8 Jan". */
+export function formatSpan(start: string, end: string): string {
+  if (start === end) return formatDay(start);
+  const sameMonth = start.slice(0, 7) === end.slice(0, 7);
+  const first = sameMonth ? formatDay(start).replace(/ \w+$/, "") : formatDay(start);
+  return `${first} – ${formatDay(end)}`;
+}
+
+/** 0.5 → "½ day", 1 → "1 day", 3.5 → "3½ days" */
+export function formatDays(days: number): string {
+  const whole = Math.floor(days);
+  const half = days - whole === 0.5 ? "½" : "";
+  const number = whole === 0 && half ? "½" : `${whole}${half}`;
+  return `${number} ${days <= 1 ? "day" : "days"}`;
+}
+
 export function formatMonth({ year, month }: PayrollMonth, options: { withYear?: boolean } = {}): string {
   const name = MONTHS[month - 1] ?? "";
   return options.withYear ? `${name} ${year}` : name;
@@ -90,4 +117,14 @@ export function addMonths({ year, month }: PayrollMonth, count: number): Payroll
 /** Today in Thimphu, as a calendar date. */
 export function thimphuToday(now: Date = new Date()): PlainDate {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Thimphu" }).format(now) as PlainDate;
+}
+
+/** "?month=2026-10" → that month; anything else → this month. */
+export function monthFromParam(param: string | undefined, today: string): PayrollMonth {
+  return param && /^\d{4}-(0[1-9]|1[0-2])$/.test(param) ? monthOf(`${param}-01`) : monthOf(today);
+}
+
+export function monthBounds({ year, month }: PayrollMonth): { from: string; to: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return { from: `${year}-${pad(month)}-01`, to: `${year}-${pad(month)}-${pad(new Date(Date.UTC(year, month, 0)).getUTCDate())}` };
 }

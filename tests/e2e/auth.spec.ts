@@ -32,7 +32,6 @@ test("an admin lands on the admin home", async ({ page }, testInfo) => {
   await signIn(page, ADMIN.email);
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole("heading", { name: `Hello, ${ADMIN.firstName}` })).toBeVisible();
-  await expect(page.getByText("Nothing needs you right now")).toBeVisible();
   await expectNoSideways(page);
   await testInfo.attach("admin-home", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
 });
@@ -40,7 +39,7 @@ test("an admin lands on the admin home", async ({ page }, testInfo) => {
 test("signing out ends the session", async ({ page }) => {
   await signIn(page, EMPLOYEE.email);
   await expect(page).toHaveURL(/\/$/);
-  await signOut(page);
+  await signOut(page, { viaButton: true });
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
 });

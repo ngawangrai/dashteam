@@ -66,7 +66,7 @@ function toPersonView(row: Person): PersonView {
   };
 }
 
-function toPayView(row: PayRecord): PayRecordView {
+export function toPayView(row: PayRecord): PayRecordView {
   const base = { id: row.id, note: row.note, createdAt: row.createdAt, effectiveFrom: row.effectiveFrom as PlainDate };
   return row.employmentType === "intern"
     ? { ...base, employmentType: "intern", stipend: row.stipendCh ?? 0 }

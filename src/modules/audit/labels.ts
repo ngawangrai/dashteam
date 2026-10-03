@@ -14,7 +14,21 @@ export type AuditAction =
   | "profile_change.requested"
   | "profile_change.withdrawn"
   | "profile_change.approved"
-  | "profile_change.declined";
+  | "profile_change.declined"
+  | "leave.requested"
+  | "leave.entered"
+  | "leave.approved"
+  | "leave.declined"
+  | "leave.cancelled"
+  | "holiday.added"
+  | "holiday.moved"
+  | "holiday.updated"
+  | "holiday.confirmed"
+  | "holiday.copied"
+  | "holiday.removed"
+  | "exit_leave.accepted"
+  | "exit_leave.changed"
+  | "exit_leave.waived";
 
 export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
   await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);

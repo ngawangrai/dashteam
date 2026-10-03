@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BASIS_POINTS_PER_WHOLE, type RuleKey, type RuleValues } from "./types";
+import { BASIS_POINTS_PER_WHOLE, type LeaveAllowance, type LeavePolicy, type LeaveType, type RuleKey, type RuleValues } from "./types";
 
 // Rule values are stored as snake_case jsonb and validated here before any calculation sees them.
 
@@ -59,6 +59,81 @@ const proration = z
 
 const it1aInclusion = z.object({ include: z.boolean() }).strict();
 
+// ── Leave ─────────────────────────────────────────────────────────────────────
+
+const LEAVE_TYPE_NAMES = [
+  "annual",
+  "sick",
+  "professional_development",
+  "maternity",
+  "paternity",
+  "bereavement",
+  "family_emergency",
+  "unpaid",
+] as const satisfies readonly LeaveType[];
+
+// Leave is counted in whole or half days.
+const leaveDays = z
+  .number()
+  .nonnegative()
+  .refine((days) => Number.isInteger(days * 2), "Leave days are whole or half days");
+
+const allowance = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("per_year"), days: leaveDays, prorate: z.boolean() }).strict(),
+    z
+      .object({
+        kind: z.literal("per_event"),
+        days: leaveDays,
+        later_child_days: leaveDays.nullable(),
+        within_days_of_event: z.number().int().positive().nullable(),
+      })
+      .strict(),
+    z.object({ kind: z.literal("approval_only") }).strict(),
+    z.object({ kind: z.literal("unlimited") }).strict(),
+  ])
+  .transform((value): LeaveAllowance => {
+    switch (value.kind) {
+      case "per_year":
+        return { kind: "perYear", days: value.days, prorate: value.prorate };
+      case "per_event":
+        return {
+          kind: "perEvent",
+          days: value.days,
+          laterChildDays: value.later_child_days,
+          withinDaysOfEvent: value.within_days_of_event,
+        };
+      case "approval_only":
+        return { kind: "approvalOnly" };
+      default:
+        return { kind: "unlimited" };
+    }
+  });
+
+const leaveTypePolicy = z
+  .object({ allowance, count: z.enum(["working", "calendar"]), half_days: z.boolean(), paid: z.boolean() })
+  .strict()
+  .transform((value) => ({ allowance: value.allowance, count: value.count, halfDays: value.half_days, paid: value.paid }));
+
+const leavePolicy = z
+  .object({ types: z.partialRecord(z.enum(LEAVE_TYPE_NAMES), leaveTypePolicy) })
+  .strict()
+  .transform((value) => value.types as LeavePolicy);
+
+const leaveCarryForward = z
+  .object({ days: z.partialRecord(z.enum(LEAVE_TYPE_NAMES), leaveDays) })
+  .strict()
+  .transform((value) => value.days);
+
+const workingWeek = z
+  .object({ days: z.array(z.number().int().min(1).max(7)).min(1) })
+  .strict()
+  .refine((value) => new Set(value.days).size === value.days.length, "A weekday is listed twice");
+
+const prorationCutoff = z.object({ day: z.number().int().min(1).max(28) }).strict();
+const leaveBackdate = z.object({ months: z.number().int().min(0).max(12) }).strict();
+const leaveExitPayout = z.object({ enabled: z.boolean() }).strict();
+
 const schemas = {
   tds,
   health_contribution: healthContribution,
@@ -66,6 +141,12 @@ const schemas = {
   gis,
   proration,
   it1a_inclusion: it1aInclusion,
+  leave_policy: leavePolicy,
+  leave_carry_forward: leaveCarryForward,
+  working_week: workingWeek,
+  proration_cutoff: prorationCutoff,
+  leave_backdate: leaveBackdate,
+  leave_exit_payout: leaveExitPayout,
 } satisfies { [K in RuleKey]: z.ZodType<RuleValues[K]> };
 
 export function parseRuleValue<K extends RuleKey>(key: K, value: unknown): RuleValues[K] {

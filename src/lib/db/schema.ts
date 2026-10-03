@@ -1,10 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   date,
+  integer,
   index,
   jsonb,
+  numeric,
   pgEnum,
   pgPolicy,
   pgTable,
@@ -15,7 +18,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { authUid, authUsers, authenticatedRole } from "drizzle-orm/supabase";
-import { EMPLOYMENT_TYPES, RULE_KEYS } from "@/modules/rules/types";
+import { EMPLOYMENT_TYPES, LEAVE_TYPES, RULE_KEYS } from "@/modules/rules/types";
 
 // Interns sign in as employees; "intern" is an employment type, not a role.
 export const appRole = pgEnum("app_role", ["admin", "employee"]);
@@ -73,6 +76,12 @@ export const rules = pgTable(
       for: "select",
       to: authenticatedRole,
       using: sql`(select public.is_admin())`,
+    }),
+    // Rates and leave policy aren't secret, and everyone's leave balance is worked out from them.
+    pgPolicy("rules_select_with_access", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`(select public.has_access())`,
     }),
   ],
 ).enableRLS();
@@ -250,3 +259,187 @@ export const auditLog = pgTable(
 ).enableRLS();
 
 export type AuditEntry = typeof auditLog.$inferSelect;
+
+// ── Leave ─────────────────────────────────────────────────────────────────────
+
+export const leaveType = pgEnum("leave_type", LEAVE_TYPES);
+export const leaveStatus = pgEnum("leave_status", ["pending", "approved", "declined", "cancelled"]);
+export const childOrder = pgEnum("child_order", ["first_or_second", "later"]);
+export const settlementStatus = pgEnum("settlement_status", ["accepted", "changed", "waived"]);
+
+export const holidayKind = pgEnum("holiday_kind", ["fixed", "lunar", "one_off"]);
+export const holidayScope = pgEnum("holiday_scope", ["national", "thimphu"]);
+export const holidayStatus = pgEnum("holiday_status", ["confirmed", "tentative"]);
+
+// Government holidays: never counted as working-day leave. One dated record per holiday per year
+// (a range for multi-day holidays), never a recurrence rule. Tentative dates count, and say so.
+// Everyone reads them; admins add, change and remove them. Changes are audited and guarded (custom migration).
+export const holidays = pgTable(
+  "holidays",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    year: integer("year").notNull(),
+    kind: holidayKind("kind").notNull(),
+    scope: holidayScope("scope").notNull(),
+    status: holidayStatus("status").notNull(),
+    // Where the date comes from: the official list, a secondary source, or who declared it.
+    source: text("source").notNull(),
+    note: text("note").notNull().default(""),
+    createdBy: uuid("created_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("holidays_name_year").on(table.name, table.year),
+    index("holidays_dates").on(table.startDate, table.endDate),
+    check("holidays_end_after_start", sql`${table.endDate} >= ${table.startDate}`),
+    check(
+      "holidays_within_year",
+      sql`extract(year from ${table.startDate}) = ${table.year} and extract(year from ${table.endDate}) = ${table.year}`,
+    ),
+    check("holidays_source_given", sql`length(trim(${table.source})) > 0`),
+    pgPolicy("holidays_select_with_access", { for: "select", to: authenticatedRole, using: sql`(select public.has_access())` }),
+    pgPolicy("holidays_insert_admin", { for: "insert", to: authenticatedRole, withCheck: sql`(select public.is_admin())` }),
+    pgPolicy("holidays_update_admin", {
+      for: "update",
+      to: authenticatedRole,
+      using: sql`(select public.is_admin())`,
+      withCheck: sql`(select public.is_admin())`,
+    }),
+    pgPolicy("holidays_delete_admin", { for: "delete", to: authenticatedRole, using: sql`(select public.is_admin())` }),
+  ],
+).enableRLS();
+
+export type Holiday = typeof holidays.$inferSelect;
+
+// A request for leave. Days and balances are never stored: they are counted from the dates, the
+// working week and holidays. Dates, type and person never change after sending (trigger); people
+// can't overlap their own pending or approved leave (exclusion constraint in a custom migration).
+export const leaveRequests = pgTable(
+  "leave_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    leaveType: leaveType("leave_type").notNull(),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    // The first day is the afternoon only / the last day is the morning only.
+    startHalf: boolean("start_half").notNull().default(false),
+    endHalf: boolean("end_half").notNull().default(false),
+    childOrder: childOrder("child_order"),
+    eventDate: date("event_date"),
+    note: text("note").notNull().default(""),
+    status: leaveStatus("status").notNull().default("pending"),
+    decisionNote: text("decision_note").notNull().default(""),
+    requestedBy: uuid("requested_by").references(() => authUsers.id),
+    decidedBy: uuid("decided_by").references(() => authUsers.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    // When the person last saw a decision on this request, for the in-app dot.
+    ownerSeenAt: timestamp("owner_seen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("leave_requests_person_dates").on(table.personId, table.startDate),
+    check("leave_requests_end_after_start", sql`${table.endDate} >= ${table.startDate}`),
+    check(
+      "leave_requests_one_half_on_a_single_day",
+      sql`not (${table.startDate} = ${table.endDate} and ${table.startHalf} and ${table.endHalf})`,
+    ),
+    pgPolicy("leave_requests_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    // People send their own requests as pending; admins can enter leave for anyone, approved on entry.
+    pgPolicy("leave_requests_insert_own_pending_or_admin", {
+      for: "insert",
+      to: authenticatedRole,
+      withCheck: sql`(${table.personId} = (select public.current_person_id()) and ${table.status} = 'pending' and ${table.requestedBy} = ${authUid})
+        or (select public.is_admin())`,
+    }),
+    // What may change, and by whom, is enforced by a trigger.
+    pgPolicy("leave_requests_update_own_or_admin", {
+      for: "update",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+      withCheck: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+  ],
+).enableRLS();
+
+export type LeaveRequest = typeof leaveRequests.$inferSelect;
+
+// The admin's decision on leave taken beyond the entitlement when someone leaves.
+// Accepted or changed amounts become a recovery line in the final payroll run (milestone 4).
+export const exitLeaveSettlements = pgTable(
+  "exit_leave_settlements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    leaveYear: integer("leave_year").notNull(),
+    daysOver: numeric("days_over", { precision: 6, scale: 1, mode: "number" }).notNull(),
+    dailyRateCh: bigint("daily_rate_ch", { mode: "number" }).notNull(),
+    suggestedCh: bigint("suggested_ch", { mode: "number" }).notNull(),
+    finalCh: bigint("final_ch", { mode: "number" }),
+    unusedAnnualDays: numeric("unused_annual_days", { precision: 6, scale: 1, mode: "number" }).notNull(),
+    status: settlementStatus("status").notNull(),
+    decidedBy: uuid("decided_by").references(() => authUsers.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("exit_leave_settlements_person_year").on(table.personId, table.leaveYear),
+    check(
+      "exit_leave_settlements_amount_matches_status",
+      sql`(${table.status} = 'waived' and ${table.finalCh} is null) or (${table.status} <> 'waived' and ${table.finalCh} is not null and ${table.finalCh} >= 0)`,
+    ),
+    pgPolicy("exit_leave_settlements_admin", {
+      for: "all",
+      to: authenticatedRole,
+      using: sql`(select public.is_admin())`,
+      withCheck: sql`(select public.is_admin())`,
+    }),
+  ],
+).enableRLS();
+
+export type ExitLeaveSettlement = typeof exitLeaveSettlements.$inferSelect;
+
+// In-app notes for a person, for example when a holiday change alters how their leave is counted.
+// Written by admins' actions in the same transaction as the change; the person marks them seen.
+export const leaveNotices = pgTable(
+  "leave_notices",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    leaveRequestId: uuid("leave_request_id").references(() => leaveRequests.id, { onDelete: "cascade" }),
+    message: text("message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    seenAt: timestamp("seen_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("leave_notices_person").on(table.personId),
+    pgPolicy("leave_notices_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("leave_notices_insert_admin", { for: "insert", to: authenticatedRole, withCheck: sql`(select public.is_admin())` }),
+    // People only mark their own notes seen (column grant limits what can change).
+    pgPolicy("leave_notices_update_own", {
+      for: "update",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id())`,
+      withCheck: sql`${table.personId} = (select public.current_person_id())`,
+    }),
+  ],
+).enableRLS();
+
+export type LeaveNotice = typeof leaveNotices.$inferSelect;

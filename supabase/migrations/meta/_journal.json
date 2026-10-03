@@ -71,6 +71,34 @@
       "when": 1790964416132,
       "tag": "20261002180656_session_info",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791013362557,
+      "tag": "20261003074242_leave",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791013365041,
+      "tag": "20261003074245_leave_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791013367518,
+      "tag": "20261003074247_v1_leave_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791013369990,
+      "tag": "20261003074249_v1_holidays",
+      "breakpoints": true
     }
   ]
 }

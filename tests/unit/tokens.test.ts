@@ -51,6 +51,10 @@ describe.each([
     expect(contrast(tokens["on-accent"] ?? "", tokens["accent-fill"] ?? "")).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("badge text on the danger colour meets WCAG AA", () => {
+    expect(contrast(tokens["on-danger"] ?? "", tokens.danger ?? "")).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("text on a selected segment stays readable", () => {
     expect(contrast(tokens.label ?? "", tokens.segment ?? "")).toBeGreaterThanOrEqual(4.5);
   });

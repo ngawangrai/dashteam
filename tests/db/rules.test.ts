@@ -4,7 +4,7 @@ import { calculatePay, type PayInput } from "@/modules/payroll";
 import { resolveRules } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
 import type { EmploymentType, RuleKey, RuleRow } from "@/modules/rules/types";
-import { V1_RULE_ROWS } from "@/modules/rules/v1";
+import { V1_LEAVE_RULE_ROWS, V1_RULE_ROWS } from "@/modules/rules/v1";
 import { ADMIN_ID, EMPLOYEE_ID, as, rolledBack } from "./local-db";
 
 type DbRule = { id: string; key: RuleKey; employment_type: EmploymentType; effective_from: string; value: unknown };
@@ -30,12 +30,14 @@ const fullTimeInput = (month = october): PayInput => ({
 describe("rules access", () => {
   it("lets admins read every rule", async () => {
     const rows = await as(ADMIN_ID, (tx) => tx`select id from public.rules`);
-    expect(rows).toHaveLength(V1_RULE_ROWS.length);
+    expect(rows).toHaveLength(V1_RULE_ROWS.length + V1_LEAVE_RULE_ROWS.length);
   });
 
-  it("shows employees no rules", async () => {
+  // Since milestone 3: rates and leave policy aren't secret, and everyone's leave balance needs them.
+  it("lets employees read rules, but not change them", async () => {
     const rows = await as(EMPLOYEE_ID, (tx) => tx`select id from public.rules`);
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(V1_RULE_ROWS.length + V1_LEAVE_RULE_ROWS.length);
+    await expect(as(EMPLOYEE_ID, (tx) => tx`update public.rules set note = 'x'`)).rejects.toThrow(/permission denied/);
   });
 
   it("gives signed-out visitors nothing", async () => {
@@ -85,7 +87,7 @@ describe("V1 rules in the database", () => {
       rows
         .map(({ key, employmentType, effectiveFrom, value }) => ({ key, employmentType, effectiveFrom, value }))
         .sort((a, b) => `${a.key}${a.employmentType}`.localeCompare(`${b.key}${b.employmentType}`));
-    expect(normalise(stored)).toEqual(normalise(V1_RULE_ROWS));
+    expect(normalise(stored)).toEqual(normalise([...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS]));
   });
 
   it("calculate the same pay as the rules the unit tests use", async () => {

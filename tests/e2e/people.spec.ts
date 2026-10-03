@@ -28,6 +28,8 @@ async function addPerson(page: Page, project: string, type: "full_time" | "inter
   const email = `${type}.${project}.${stamp}@dashteam.local`;
 
   await page.goto("/admin/people/new");
+  // Typing before the form has hydrated would be lost, so wait for the page to settle.
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Full name").fill(name);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Start date").fill("2026-01-05");

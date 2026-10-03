@@ -1,4 +1,4 @@
-import type { EmploymentType, RuleKey, RuleRow } from "./types";
+import type { EmploymentType, LeaveRuleKey, PayrollRuleKey, RuleRow } from "./types";
 
 // The V1 rules from docs/PRD.md, in force from January 2026, as stored in the database (snake_case jsonb).
 // supabase/migrations/*_v1_rules.sql inserts exactly these; tests/db/rules.test.ts checks the two match.
@@ -22,7 +22,7 @@ const tds = {
   result_rounding: "nearest",
 };
 
-const values: Record<EmploymentType, Record<RuleKey, unknown>> = {
+const values: Record<EmploymentType, Record<PayrollRuleKey, unknown>> = {
   full_time: {
     tds,
     health_contribution: { enabled: true, rate_bp: 100, round_to_ch: 100, rounding: "nearest" },
@@ -44,7 +44,7 @@ const values: Record<EmploymentType, Record<RuleKey, unknown>> = {
   },
 };
 
-export const V1_NOTES: Record<RuleKey, string> = {
+export const V1_NOTES: Record<PayrollRuleKey, string> = {
   tds: "DRC Annexure III, revised TDS schedule for monthly salary income",
   health_contribution: "Health contribution, 1% of gross. Rounding to confirm with the accountant",
   provident_fund: "Off until NPPF registration (2027)",
@@ -54,11 +54,82 @@ export const V1_NOTES: Record<RuleKey, string> = {
 };
 
 export const V1_RULE_ROWS: RuleRow[] = (Object.keys(values) as EmploymentType[]).flatMap((employmentType) =>
-  (Object.keys(values[employmentType]) as RuleKey[]).map((key) => ({
+  (Object.keys(values[employmentType]) as PayrollRuleKey[]).map((key) => ({
     id: `v1:${key}:${employmentType}`,
     key,
     employmentType,
     effectiveFrom: V1_EFFECTIVE_FROM,
     value: values[employmentType][key],
+  })),
+);
+
+// ── Leave rules (milestone 3) ───────────────────────────────────────────────────
+// The founder's V1 policy. Maternity, paternity, bereavement and family emergency are provisional
+// pending the legal minimums; they are rules so they change without code.
+
+const perYear = (days: number, prorate: boolean) => ({ kind: "per_year", days, prorate });
+const working = (allowance: unknown, halfDays = true) => ({ allowance, count: "working", half_days: halfDays, paid: true });
+const approvalOnly = (count: "working" | "calendar", halfDays: boolean) => ({
+  allowance: { kind: "approval_only" },
+  count,
+  half_days: halfDays,
+  paid: true,
+});
+const unpaid = { allowance: { kind: "unlimited" }, count: "working", half_days: true, paid: false };
+
+const leavePolicy: Record<EmploymentType, unknown> = {
+  full_time: {
+    types: {
+      annual: working(perYear(25, true)),
+      sick: working(perYear(14, true)),
+      professional_development: working(perYear(5, true)),
+      maternity: {
+        allowance: { kind: "per_event", days: 180, later_child_days: 90, within_days_of_event: null },
+        count: "calendar",
+        half_days: false,
+        paid: true,
+      },
+      paternity: working({ kind: "per_event", days: 10, later_child_days: 5, within_days_of_event: 30 }, false),
+      bereavement: working({ kind: "per_event", days: 7, later_child_days: null, within_days_of_event: null }),
+      family_emergency: working(perYear(3, false)),
+      unpaid,
+    },
+  },
+  intern: {
+    types: {
+      sick: working(perYear(14, true)),
+      maternity: approvalOnly("calendar", false),
+      paternity: approvalOnly("working", false),
+      bereavement: approvalOnly("working", true),
+      family_emergency: approvalOnly("working", true),
+      unpaid,
+    },
+  },
+};
+
+const sharedLeaveValues: Record<Exclude<LeaveRuleKey, "leave_policy">, unknown> = {
+  leave_carry_forward: { days: { annual: 0, sick: 0, professional_development: 0, family_emergency: 0 } },
+  working_week: { days: [1, 2, 3, 4, 5] },
+  proration_cutoff: { day: 15 },
+  leave_backdate: { months: 1 },
+  leave_exit_payout: { enabled: false },
+};
+
+export const V1_LEAVE_NOTES: Record<LeaveRuleKey, string> = {
+  leave_policy: "V1 leave policy. Special leave values provisional pending the legal minimums",
+  leave_carry_forward: "No carry-forward in V1",
+  working_week: "Monday to Friday",
+  proration_cutoff: "Joining month counts on or before the 15th; exit month on or after it",
+  leave_backdate: "Requests may go back to the start of last month",
+  leave_exit_payout: "Unused annual leave is not paid out on exit",
+};
+
+export const V1_LEAVE_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const).flatMap((employmentType) =>
+  (["leave_policy", ...Object.keys(sharedLeaveValues)] as LeaveRuleKey[]).map((key) => ({
+    id: `v1:${key}:${employmentType}`,
+    key,
+    employmentType,
+    effectiveFrom: V1_EFFECTIVE_FROM,
+    value: key === "leave_policy" ? leavePolicy[employmentType] : sharedLeaveValues[key as Exclude<LeaveRuleKey, "leave_policy">],
   })),
 );
