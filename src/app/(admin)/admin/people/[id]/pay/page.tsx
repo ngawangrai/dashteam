@@ -9,6 +9,7 @@ import { takeHomeFor } from "@/modules/people/estimate";
 import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
 import { monthlyPayOf } from "@/modules/people/pay";
 import { getPersonDetail, rulesForMonth, thisMonth } from "@/modules/people/repository";
+import { latestLockedMonth } from "@/modules/run/repository";
 
 export const metadata = { title: "Change pay" };
 
@@ -22,9 +23,12 @@ export default async function ChangePayPage({ params }: { params: Promise<{ id: 
   if (!detail) notFound();
   const { person, current, upcoming, pay } = detail;
 
-  // This month or any of the next twelve; next month is the usual choice.
+  // This month or any of the next twelve; next month is the usual choice. A locked payroll month
+  // can't change, so it isn't offered.
   const month = thisMonth();
+  const latest = await latestLockedMonth(user);
   const taken = new Set<string>(pay.map((record) => record.effectiveFrom));
+  if (latest) for (let i = 0; i <= 12; i += 1) if (firstOfMonth(addMonths(month, i)) <= firstOfMonth(latest)) taken.add(firstOfMonth(addMonths(month, i)));
   const months = Array.from({ length: 13 }, (_, i) => {
     const m = addMonths(month, i);
     return { value: firstOfMonth(m), label: `${formatMonth(m, { withYear: true })}${i === 0 ? " (this month)" : ""}` };

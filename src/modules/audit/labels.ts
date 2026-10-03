@@ -28,7 +28,12 @@ export type AuditAction =
   | "holiday.removed"
   | "exit_leave.accepted"
   | "exit_leave.changed"
-  | "exit_leave.waived";
+  | "exit_leave.waived"
+  | "payroll.first_month_set"
+  | "payroll.line_added"
+  | "payroll.line_removed"
+  | "payroll.acknowledged"
+  | "payroll.locked";
 
 export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
   await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);

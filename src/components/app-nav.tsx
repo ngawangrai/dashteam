@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, CircleUser, House, type LucideIcon, Palmtree, Users } from "lucide-react";
+import { CalendarDays, CircleUser, House, type LucideIcon, Palmtree, Users, Wallet } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -16,10 +16,11 @@ const home = (href: Route): NavItem => ({ href, label: "Home", icon: House, matc
 const leave: NavItem = { href: "/leave", label: "Leave", icon: Palmtree, matches: (path) => path.startsWith("/leave"), badge: "leave" };
 const calendar: NavItem = { href: "/admin/calendar", label: "Calendar", icon: CalendarDays, matches: (path) => path.startsWith("/admin/calendar") };
 const people: NavItem = { href: "/admin/people", label: "People", icon: Users, matches: (path) => path.startsWith("/admin/people") };
+const payroll: NavItem = { href: "/admin/payroll", label: "Payroll", icon: Wallet, matches: (path) => path.startsWith("/admin/payroll") };
 const profile: NavItem = { href: "/profile", label: "Profile", icon: CircleUser, matches: (path) => path.startsWith("/profile") };
 
 function itemsFor(role: AppRole): NavItem[] {
-  return role === "admin" ? [home("/admin"), people, calendar, profile] : [home("/"), leave, profile];
+  return role === "admin" ? [home("/admin"), people, payroll, calendar, profile] : [home("/"), leave, profile];
 }
 
 function badgeFor(item: NavItem, badges: NavBadges): { label: string; count: number | null } | null {

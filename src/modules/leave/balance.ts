@@ -1,4 +1,6 @@
+import { addMonths, monthOf } from "@/lib/format";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
+import { lockedMessage } from "@/modules/run/locked";
 import type { ChildOrder, EmploymentType, LeaveAllowance, LeaveType, RuleRow } from "@/modules/rules/types";
 import { type LeaveCalendar, type LeaveSpan, countLeaveDays, daysInYear } from "./days";
 
@@ -110,13 +112,27 @@ export type Assessment =
   | { ok: true; days: number; leftAfter: number | null; allowance: number | null; count: "working" | "calendar" }
   | { ok: false; reason: string; days?: number };
 
+/**
+ * Locked payroll months, as a range: from the first month DashTeam paid to the end of the latest
+ * locked month (months lock in order). Who is asking decides what the refusal tells them to do.
+ */
+export type LockedRange = { from: string; through: string; audience: "admin" | "employee" };
+
+function lockedRefusal(request: LeaveSpan, locked: LockedRange | undefined): string | null {
+  if (!locked || request.endDate < locked.from || request.startDate > locked.through) return null;
+  const first = request.startDate < locked.from ? locked.from : request.startDate;
+  return lockedMessage({ locked: monthOf(first), draft: addMonths(monthOf(locked.through), 1) }, locked.audience);
+}
+
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 /** Whether a new request fits the rules and the balance. Used live while picking dates, and again on the server. */
 export function assessRequest(
   request: NewRequest,
-  context: Omit<BalanceInput, "leaveType" | "year" | "childOrder">,
+  context: Omit<BalanceInput, "leaveType" | "year" | "childOrder"> & { locked?: LockedRange },
 ): Assessment {
+  const locked = lockedRefusal(request, context.locked);
+  if (locked) return { ok: false, reason: locked };
   const rules = resolveLeaveRules(context.ruleRows, context.employmentType, { year: Number(request.startDate.slice(0, 4)), month: 1 });
   const policy = rules.policy[request.leaveType];
   if (!policy) return { ok: false, reason: "This kind of leave isn’t available to you." };

@@ -4,7 +4,7 @@ import { calculatePay, type PayInput } from "@/modules/payroll";
 import { resolveRules } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
 import type { EmploymentType, RuleKey, RuleRow } from "@/modules/rules/types";
-import { V1_LEAVE_RULE_ROWS, V1_RULE_ROWS } from "@/modules/rules/v1";
+import { V1_LEAVE_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "@/modules/rules/v1";
 import { ADMIN_ID, EMPLOYEE_ID, as, rolledBack } from "./local-db";
 
 type DbRule = { id: string; key: RuleKey; employment_type: EmploymentType; effective_from: string; value: unknown };
@@ -16,6 +16,7 @@ async function ruleRows(tx: postgres.TransactionSql): Promise<RuleRow[]> {
   );
 }
 
+const ALL_V1_ROWS = [...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS, ...V1_SETTINGS_RULE_ROWS];
 const october = { year: 2026, month: 10 };
 const november = { year: 2026, month: 11 };
 const fullTimeInput = (month = october): PayInput => ({
@@ -30,13 +31,13 @@ const fullTimeInput = (month = october): PayInput => ({
 describe("rules access", () => {
   it("lets admins read every rule", async () => {
     const rows = await as(ADMIN_ID, (tx) => tx`select id from public.rules`);
-    expect(rows).toHaveLength(V1_RULE_ROWS.length + V1_LEAVE_RULE_ROWS.length);
+    expect(rows).toHaveLength(ALL_V1_ROWS.length);
   });
 
   // Since milestone 3: rates and leave policy aren't secret, and everyone's leave balance needs them.
   it("lets employees read rules, but not change them", async () => {
     const rows = await as(EMPLOYEE_ID, (tx) => tx`select id from public.rules`);
-    expect(rows).toHaveLength(V1_RULE_ROWS.length + V1_LEAVE_RULE_ROWS.length);
+    expect(rows).toHaveLength(ALL_V1_ROWS.length);
     await expect(as(EMPLOYEE_ID, (tx) => tx`update public.rules set note = 'x'`)).rejects.toThrow(/permission denied/);
   });
 
@@ -44,11 +45,21 @@ describe("rules access", () => {
     await expect(as(null, (tx) => tx`select id from public.rules`)).rejects.toThrow(/permission denied/);
   });
 
-  it("refuses writes through the API, even from an admin", async () => {
+  it("refuses rate and leave rules through the API, even from an admin", async () => {
     await expect(
       as(ADMIN_ID, (tx) => tx`insert into public.rules (key, employment_type, effective_from, value, note)
                               values ('gis', 'full_time', '2027-01-01', '{"amount_ch": 0}', 'test')`),
-    ).rejects.toThrow(/permission denied/);
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  // Since milestone 4: the first payroll month is set from the Payroll screen.
+  it("lets an admin add payroll settings, and nobody else", async () => {
+    const insertSettings = (tx: postgres.TransactionSql) =>
+      tx`insert into public.rules (key, employment_type, effective_from, value, note)
+         values ('payroll_settings', 'full_time', '2027-01-01', '{"first_month": "2027-01-01", "large_change_bp": 1000, "due_day": 10}', 'test')
+         returning id`;
+    expect(await as(ADMIN_ID, insertSettings)).toHaveLength(1);
+    await expect(as(EMPLOYEE_ID, insertSettings)).rejects.toThrow(/row-level security/);
   });
 });
 
@@ -87,7 +98,7 @@ describe("V1 rules in the database", () => {
       rows
         .map(({ key, employmentType, effectiveFrom, value }) => ({ key, employmentType, effectiveFrom, value }))
         .sort((a, b) => `${a.key}${a.employmentType}`.localeCompare(`${b.key}${b.employmentType}`));
-    expect(normalise(stored)).toEqual(normalise([...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS]));
+    expect(normalise(stored)).toEqual(normalise(ALL_V1_ROWS));
   });
 
   it("calculate the same pay as the rules the unit tests use", async () => {

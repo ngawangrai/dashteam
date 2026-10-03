@@ -1,5 +1,6 @@
+import { addMonths, monthOf } from "@/lib/format";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
-import type { EmploymentType, LeaveType, RuleRow } from "@/modules/rules/types";
+import type { EmploymentType, LeaveType, PayrollMonth, RuleRow } from "@/modules/rules/types";
 import type { LeaveRequestFacts } from "./balance";
 import { countLeaveDays } from "./days";
 
@@ -165,4 +166,56 @@ export function copyFixedHolidays(
 /** From 1 November, remind the admin while next year has no confirmed holidays. */
 export function needsHolidayReminder(today: string, nextYearConfirmed: number): boolean {
   return today.slice(5) >= "11-01" && nextYearConfirmed === 0;
+}
+
+// ── Locked payroll months ─────────────────────────────────────────────────────────
+
+type HolidayFields = Pick<Holiday, "name" | "startDate" | "endDate" | "kind" | "scope">;
+
+export type HolidayChangeShape =
+  | { mode: "add"; values: HolidayFields }
+  | { mode: "edit"; id: string; values: HolidayFields }
+  | { mode: "remove"; id: string }
+  | { mode: "confirm"; id: string }
+  | { mode: "copy"; fromYear: number; toYear: number };
+
+const monthNumber = ({ year, month }: PayrollMonth) => year * 12 + month;
+
+function lockedMonthIn(span: Pick<Holiday, "startDate" | "endDate">, locked: readonly PayrollMonth[]): PayrollMonth | null {
+  const last = monthNumber(monthOf(span.endDate));
+  for (let m = monthOf(span.startDate); monthNumber(m) <= last; m = addMonths(m, 1)) {
+    if (locked.some((l) => monthNumber(l) === monthNumber(m))) return m;
+  }
+  return null;
+}
+
+/**
+ * The locked payroll month a holiday change would reach into, if any, decided the same way as the
+ * database: adding, moving, renaming or removing a holiday there is refused; confirming a tentative
+ * date changes only its label, so it is allowed.
+ */
+export function holidayChangeLockedMonth(
+  change: HolidayChangeShape,
+  before: readonly (Holiday & { id?: string })[],
+  locked: readonly PayrollMonth[],
+): PayrollMonth | null {
+  if (!locked.length) return null;
+  const current = "id" in change ? before.find((h) => h.id === change.id) : undefined;
+  switch (change.mode) {
+    case "add":
+      return lockedMonthIn(change.values, locked);
+    case "edit": {
+      if (!current) return null;
+      const next = change.values;
+      const datesChanged = current.startDate !== next.startDate || current.endDate !== next.endDate;
+      const identityChanged = datesChanged || current.name !== next.name || current.kind !== next.kind || current.scope !== next.scope;
+      return (identityChanged ? lockedMonthIn(current, locked) : null) ?? (datesChanged ? lockedMonthIn(next, locked) : null);
+    }
+    case "remove":
+      return current ? lockedMonthIn(current, locked) : null;
+    case "copy":
+      return copyFixedHolidays(before, change.fromYear, change.toYear).copies.map((copy) => lockedMonthIn(copy, locked)).find(Boolean) ?? null;
+    default:
+      return null;
+  }
 }

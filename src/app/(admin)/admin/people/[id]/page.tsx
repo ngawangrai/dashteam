@@ -13,6 +13,7 @@ import { LeaveList } from "@/components/leave/leave-list";
 import { RequestLeaveSheet } from "@/components/leave/request-sheet";
 import { firstNameFrom } from "@/lib/auth/roles";
 import { requireRole } from "@/lib/auth/session";
+import { lockedRange } from "@/modules/run/repository";
 import { enterLeaveFor } from "@/modules/leave/actions";
 import { balancesFor, exitLeaveFor, loadLeaveContext, sheetContextFor } from "@/modules/leave/repository";
 import { formatDate, formatMonth, formatPhone, monthOf, thimphuToday } from "@/lib/format";
@@ -34,7 +35,7 @@ export default async function PersonPage({ params }: Params) {
   const { person, current, upcoming, pendingRequest } = detail;
   const [rules, leave, exit] = await Promise.all([rulesForMonth(user), loadLeaveContext(user, person.id), exitLeaveFor(user, person.id)]);
   const today = thimphuToday();
-  const sheet = leave ? sheetContextFor(leave) : null;
+  const sheet = leave ? sheetContextFor(leave, await lockedRange(user)) : null;
   const firstName = firstNameFrom(person.fullName, person.email);
   const recentLeave = leave ? [...leave.requests].reverse().slice(0, 5) : [];
   const takeHome = current && rules ? takeHomeFor(current, rules) : null;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RuleRow } from "@/modules/rules/types";
 import { V1_LEAVE_RULE_ROWS } from "@/modules/rules/v1";
-import { type LeaveRequestFacts, balanceFor, entitlementFor, monthsEmployedInYear } from "./balance";
+import { type LeaveRequestFacts, assessRequest, balanceFor, entitlementFor, monthsEmployedInYear } from "./balance";
 
 const calendar = { workingWeek: [1, 2, 3, 4, 5], holidays: ["2026-11-11"] };
 const longServing = { startDate: "2025-03-03", endDate: null };
@@ -123,5 +123,33 @@ describe("per-event leave", () => {
     expect(balanceFor({ ...facts, leaveType: "maternity", childOrder: "first_or_second" })).toEqual({ kind: "perEvent", allowance: 180, count: "calendar" });
     expect(balanceFor({ ...facts, leaveType: "maternity", childOrder: "later" })).toEqual({ kind: "perEvent", allowance: 90, count: "calendar" });
     expect(balanceFor({ ...facts, leaveType: "bereavement" })).toEqual({ kind: "perEvent", allowance: 7, count: "working" });
+  });
+});
+
+describe("leave in a locked payroll month", () => {
+  const context = (audience: "admin" | "employee") => ({
+    employmentType: "full_time" as const,
+    person: longServing,
+    requests: [],
+    ruleRows: V1_LEAVE_RULE_ROWS,
+    calendar,
+    locked: { from: "2026-09-01", through: "2026-10-31", audience },
+  });
+  const ask = (startDate: string, endDate: string) => ({ leaveType: "annual" as const, startDate, endDate, startHalf: false, endHalf: false, childOrder: null, eventDate: null });
+
+  it("is refused before it's sent, naming the month and what to do", () => {
+    expect(assessRequest(ask("2026-10-26", "2026-10-27"), context("employee"))).toEqual({
+      ok: false,
+      reason: "October payroll is locked. Ask your admin to add a correction.",
+    });
+    expect(assessRequest(ask("2026-10-30", "2026-11-03"), context("admin"))).toEqual({
+      ok: false,
+      reason: "October 2026 payroll is locked, so this can’t change. Add a correction to November’s payroll instead.",
+    });
+  });
+
+  it("is fine in an open month, or before payroll started in DashTeam", () => {
+    expect(assessRequest(ask("2026-11-02", "2026-11-03"), context("employee")).ok).toBe(true);
+    expect(assessRequest(ask("2026-08-03", "2026-08-04"), context("employee")).ok).toBe(true);
   });
 });

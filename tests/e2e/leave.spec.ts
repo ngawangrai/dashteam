@@ -198,8 +198,11 @@ test("leave taken beyond the entitlement at exit becomes a suggestion the admin 
   await expect(page.getByText("Suggested recovery: 2 days × Nu. 1,161.29 =")).toBeVisible();
   await expect(page.getByText("Nu. 2,323", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Accept suggestion" }).click();
-  await expect(page.getByText(/recovery in their final payroll/)).toBeVisible();
+  // Since milestone 4 the recovery lands on their final month's payroll as a one-off, in the same change.
+  await expect(page.getByText("Saved. It’s a leave recovery on their October payroll.")).toBeVisible();
   const [entry] = await db`select action from public.audit_log where entity_table = 'exit_leave_settlements' and after ->> 'person_id' = ${person?.id ?? ""}`;
   expect(entry?.action).toBe("exit_leave.accepted");
+  const lines = await db`select month::text, kind::text, amount_ch::int as amount, source::text from public.payroll_lines where person_id = ${person?.id ?? ""}`;
+  expect(lines).toEqual([{ month: "2026-10-01", kind: "leave_recovery", amount: 232_300, source: "exit_settlement" }]);
   await db`delete from public.people where id = ${person?.id}`;
 });

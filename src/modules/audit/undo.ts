@@ -27,7 +27,8 @@ export async function undoChange(transactionId: number): Promise<UndoResult> {
       return rows[0]?.undone ?? [];
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
+    const message = error instanceof Error ? `${error.message} ${String((error as { cause?: unknown }).cause ?? "")}` : "";
+    if (/payroll_locked:/.test(message)) return { ok: false, message: "That month’s payroll is locked, so this can’t be undone." };
     if (/changed since/.test(message)) return { ok: false, message: "This was changed since, so it can’t be undone." };
     if (/no longer available/.test(message)) return { ok: false, message: "It’s too late to undo this." };
     return { ok: false, message: "We couldn’t undo that. Try again in a minute." };

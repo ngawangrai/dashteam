@@ -6,6 +6,7 @@ import {
   PAYROLL_RULE_KEYS,
   type PayrollMonth,
   type PayrollRuleValues,
+  type PayrollSettings,
   type ResolvedLeaveRules,
   type ResolvedRules,
   type RuleKey,
@@ -86,4 +87,17 @@ export function resolveLeaveRules(rows: readonly RuleRow[], employmentType: Empl
     exitPayout: v.leave_exit_payout,
     ruleIds,
   };
+}
+
+/**
+ * Company-wide payroll settings in force for a month. They are stored for both employment types and
+ * written together; if the two ever differ, that is an error rather than a guess.
+ */
+export function resolvePayrollSettings(rows: readonly RuleRow[], month: PayrollMonth): PayrollSettings {
+  const fullTime = rulesInForce(rows, ["payroll_settings"], "full_time", month);
+  const intern = rulesInForce(rows, ["payroll_settings"], "intern", month);
+  if (JSON.stringify(fullTime.values.payroll_settings) !== JSON.stringify(intern.values.payroll_settings)) {
+    throw new Error("Payroll settings differ between employment types");
+  }
+  return { ...fullTime.values.payroll_settings, ruleIds: [...fullTime.ruleIds, ...intern.ruleIds] };
 }

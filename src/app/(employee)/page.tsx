@@ -6,6 +6,7 @@ import { BalanceSummary } from "@/components/leave/balance-summary";
 import { RequestLeaveSheet } from "@/components/leave/request-sheet";
 import { Page } from "@/components/page";
 import { requireUser } from "@/lib/auth/session";
+import { lockedRange } from "@/modules/run/repository";
 import { formatDays, formatSpan, thimphuToday } from "@/lib/format";
 import { requestLeave } from "@/modules/leave/actions";
 import { LEAVE_TYPE_NAME } from "@/modules/leave/labels";
@@ -17,7 +18,7 @@ export default async function EmployeeHomePage() {
   const user = await requireUser();
   const context = user.personId ? await loadLeaveContext(user, user.personId) : null;
   const today = thimphuToday();
-  const sheet = context ? sheetContextFor(context) : null;
+  const sheet = context ? sheetContextFor(context, await lockedRange(user)) : null;
 
   if (!context || !sheet) {
     return (

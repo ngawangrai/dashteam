@@ -6,11 +6,14 @@ import { z } from "zod";
 import { claimsFor, requireRole, type SessionUser } from "@/lib/auth/session";
 import { asUser, type Tx } from "@/lib/db/client";
 import { holidays, leaveNotices } from "@/lib/db/schema";
-import { formatDays, formatSpan } from "@/lib/format";
+import { addMonths, formatDays, formatSpan } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
 import { loadRuleRows } from "@/modules/rules/repository";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
-import { type Holiday, type ImpactChange, copyFixedHolidays, holidayImpact, impactFingerprint } from "./holidays";
+import type { PayrollMonth } from "@/modules/rules/types";
+import { lockedMessage, lockedMonthsIn } from "@/modules/run/locked";
+import { lockedMonths } from "@/modules/run/repository";
+import { type Holiday, type ImpactChange, copyFixedHolidays, holidayChangeLockedMonth, holidayImpact, impactFingerprint } from "./holidays";
 import { LEAVE_TYPE_NAME } from "./labels";
 import { allHolidays, impactRequests } from "./repository";
 
@@ -73,9 +76,16 @@ function fieldErrorsOf(error: z.ZodError) {
   return fieldErrors;
 }
 
+const monthNumber = ({ year, month }: PayrollMonth) => year * 12 + month;
+
 /** Works out what a change does, without saving anything. */
 async function plan(user: SessionUser, change: z.output<typeof changeSchema>): Promise<Planned | { error: string }> {
-  const [before, requests, ruleRows] = await Promise.all([allHolidays(user), impactRequests(user), loadRuleRows(claimsFor(user))]);
+  const [before, requests, ruleRows, locked] = await Promise.all([allHolidays(user), impactRequests(user), loadRuleRows(claimsFor(user)), lockedMonths(user)]);
+  const lockedMonth = holidayChangeLockedMonth(change, before, locked);
+  if (lockedMonth) {
+    const latest = locked.reduce((a, b) => (monthNumber(a) > monthNumber(b) ? a : b));
+    return { error: lockedMessage({ locked: lockedMonth, draft: addMonths(latest, 1) }, "admin") };
+  }
   const find = (id: string) => before.find((holiday) => holiday.id === id);
   let after: Holiday[];
   let summary: string;
@@ -225,7 +235,8 @@ export async function saveHolidayChange(input: HolidayChange, fingerprint: strin
     if (/holidays_name_year/.test(text)) {
       return { status: "error", message: "There’s already a holiday with this name that year.", fieldErrors: { name: "There’s already a holiday with this name that year." } };
     }
-    if (/locked payroll month/.test(text)) return { status: "error", message: "That falls in a locked payroll month, so it can’t change." };
+    const lockedMonths = lockedMonthsIn(error);
+    if (lockedMonths) return { status: "error", message: lockedMessage(lockedMonths, "admin") };
     return { status: "error", message: "We couldn’t save that just now. Try again in a minute." };
   }
 }

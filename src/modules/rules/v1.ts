@@ -133,3 +133,17 @@ export const V1_LEAVE_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const).
     value: key === "leave_policy" ? leavePolicy[employmentType] : sharedLeaveValues[key as Exclude<LeaveRuleKey, "leave_policy">],
   })),
 );
+
+// ── Payroll settings (milestone 4) ──────────────────────────────────────────────
+// No first month until the admin chooses one on the Payroll screen.
+
+export const V1_SETTINGS_VALUE = { first_month: null, large_change_bp: 1_000, due_day: 10 };
+export const V1_SETTINGS_NOTE = "Payroll settings. First month not set yet; flag a 10% change; TDS and HC due on the 10th";
+
+export const V1_SETTINGS_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const).map((employmentType) => ({
+  id: `v1:payroll_settings:${employmentType}`,
+  key: "payroll_settings",
+  employmentType,
+  effectiveFrom: V1_EFFECTIVE_FROM,
+  value: V1_SETTINGS_VALUE,
+}));

@@ -6,10 +6,12 @@ import type { z } from "zod";
 import { firstNameFrom } from "@/lib/auth/roles";
 import { claimsFor, requireRole, requireUser, type SessionUser } from "@/lib/auth/session";
 import { asUser, type Tx } from "@/lib/db/client";
-import { exitLeaveSettlements, leaveNotices, leaveRequests, people } from "@/lib/db/schema";
-import { addMonths, firstOfMonth, formatDate, formatDays, formatSpan, monthOf, thimphuToday } from "@/lib/format";
+import { exitLeaveSettlements, leaveNotices, leaveRequests, payrollLines, people } from "@/lib/db/schema";
+import { addMonths, firstOfMonth, formatDate, formatDays, formatMonth, formatSpan, monthOf, thimphuToday } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
+import { lockedMessage, lockedMonthsIn } from "@/modules/run/locked";
+import { lockedRange } from "@/modules/run/repository";
 import { assessRequest } from "./balance";
 import { LEAVE_TYPE_NAME } from "./labels";
 import { exitLeaveFor, loadLeaveContext } from "./repository";
@@ -73,6 +75,7 @@ async function sendRequest(user: SessionUser, personId: string, formData: FormDa
         requests: context.requests,
         ruleRows: context.ruleRows,
         calendar: context.calendar,
+        locked: (await lockedRange(user)) ?? undefined,
       });
       if (!assessment.ok) return { error: assessment.reason };
 
@@ -105,7 +108,8 @@ async function sendRequest(user: SessionUser, personId: string, formData: FormDa
     };
   } catch (error) {
     if (/no_overlap/.test(errorText(error))) return { status: "error", message: "There’s already leave on some of these days." };
-    if (/locked/.test(errorText(error))) return { status: "error", message: "Payroll for this month is locked. Ask your admin to add a correction." };
+    const locked = lockedMonthsIn(error);
+    if (locked) return { status: "error", message: lockedMessage(locked, mode === "own" ? "employee" : "admin") };
     return { status: "error", message: SAVE_FAILED };
   }
 }
@@ -147,7 +151,8 @@ export async function decideLeave(requestId: string, decision: "approved" | "dec
       transactionId: result.transactionId,
     };
   } catch (error) {
-    if (/locked/.test(errorText(error))) return { status: "error", message: "Payroll for this month is locked. Add a correction in this month instead." };
+    const locked = lockedMonthsIn(error);
+    if (locked) return { status: "error", message: lockedMessage(locked, "admin") };
     return { status: "error", message: SAVE_FAILED };
   }
 }
@@ -168,6 +173,8 @@ export async function cancelLeave(requestId: string): Promise<LeaveActionState> 
     revalidatePath("/", "layout");
     return { status: "done", message: "Leave cancelled.", transactionId };
   } catch (error) {
+    const locked = lockedMonthsIn(error);
+    if (locked) return { status: "error", message: lockedMessage(locked, user.role === "admin" ? "admin" : "employee") };
     if (/only be cancelled by an admin/.test(errorText(error))) {
       return { status: "error", message: "This leave has started. Ask your admin if it needs to change." };
     }
@@ -206,7 +213,9 @@ export async function settleExitLeave(personId: string, _previous: LeaveActionSt
   const finalCh = decision === "waived" ? null : decision === "changed" ? amount : settlement.suggested;
 
   try {
-    const transactionId = await asUser(claimsFor(admin), async (tx) => {
+    const result = await asUser(claimsFor(admin), async (tx) => {
+      const [person] = await tx.select({ endDate: people.endDate }).from(people).where(eq(people.id, personId)).limit(1);
+      if (!person?.endDate) return null;
       await labelNextWrites(tx, `exit_leave.${decision}`);
       await tx.insert(exitLeaveSettlements).values({
         personId,
@@ -219,15 +228,34 @@ export async function settleExitLeave(personId: string, _previous: LeaveActionSt
         status: decision,
         decidedBy: admin.id,
       });
-      return currentTransactionId(tx);
+      // The recovery goes on their final month's payroll as a leave recovery line, in the same
+      // change, so undoing the decision removes it too. A locked final month refuses it.
+      const exitMonth = monthOf(person.endDate);
+      if (finalCh) {
+        await labelNextWrites(tx, "payroll.line_added");
+        await tx.insert(payrollLines).values({
+          month: firstOfMonth(exitMonth),
+          personId,
+          kind: "leave_recovery",
+          amountCh: finalCh,
+          note: "Leave taken beyond entitlement",
+          source: "exit_settlement",
+          createdBy: admin.id,
+        });
+      }
+      return { exitMonth, transactionId: await currentTransactionId(tx) };
     });
+    if (!result) return { status: "error", message: "There’s nothing to settle for this person." };
     revalidatePath(`/admin/people/${personId}`);
+    revalidatePath("/admin/payroll", "layout");
     const message =
-      decision === "waived"
+      decision === "waived" || !finalCh
         ? "Recovery waived. Nothing will be taken from their final pay."
-        : "Saved. It will appear as a recovery in their final payroll.";
-    return { status: "done", message, transactionId };
-  } catch {
+        : `Saved. It’s a leave recovery on their ${formatMonth(result.exitMonth)} payroll.`;
+    return { status: "done", message, transactionId: result.transactionId };
+  } catch (error) {
+    const locked = lockedMonthsIn(error);
+    if (locked) return { status: "error", message: `${formatMonth(locked.locked, { withYear: true })} payroll is locked, so this can’t go into their final pay.` };
     return { status: "error", message: SAVE_FAILED };
   }
 }

@@ -99,6 +99,27 @@
       "when": 1791013369990,
       "tag": "20261003074249_v1_holidays",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791016751365,
+      "tag": "20261003083911_payroll",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791016769230,
+      "tag": "20261003083929_v1_payroll_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791016771723,
+      "tag": "20261003083931_payroll_guards",
+      "breakpoints": true
     }
   ]
 }

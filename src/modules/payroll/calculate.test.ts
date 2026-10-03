@@ -199,6 +199,22 @@ describe("one-off lines", () => {
     expect(withRecovery.takeHome).toBe(without.takeHome - nu(5_000));
     expect(without).toMatchObject({ tds: nu(3_333), healthContribution: nu(500), takeHome: nu(46_167) });
   });
+
+  it("takes another deduction after tax, the same way, adding it to the recoveries", () => {
+    const without = pay(salary({ basic: 50_000 }));
+    const withBoth = pay(
+      salary({
+        basic: 50_000,
+        recoveries: [
+          { kind: "advance_recovery", amount: nu(5_000), note: "Advance, 1 of 4" },
+          { kind: "other_deduction", amount: nu(1_200), note: "Lost laptop charger" },
+        ],
+      }),
+    );
+    expect(withBoth).toMatchObject({ gross: without.gross, healthContribution: without.healthContribution, tds: without.tds });
+    expect(withBoth.recoveries).toBe(nu(6_200));
+    expect(withBoth.takeHome).toBe(without.takeHome - nu(6_200));
+  });
 });
 
 describe("proration by calendar days", () => {

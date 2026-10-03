@@ -45,7 +45,8 @@ const payInputSchema = z.object({
       z.object({ kind: z.literal("adjustment"), amount: money, note: z.string() }),
     ]),
   ),
-  recoveries: z.array(z.object({ kind: z.literal("advance_recovery"), amount: nonNegativeMoney, note: z.string() })),
+  // Taken from take-home after tax: never part of gross, HC or TDS.
+  recoveries: z.array(z.object({ kind: z.enum(["advance_recovery", "other_deduction"]), amount: nonNegativeMoney, note: z.string() })),
 });
 
 export type PayInput = {
@@ -56,7 +57,7 @@ export type PayInput = {
   lastWorkingDay?: PlainDate;
   unpaidLeaveDays: number;
   lines: { kind: "arrear" | "bonus" | "adjustment"; amount: Chhertum; note: string }[];
-  recoveries: { kind: "advance_recovery"; amount: Chhertum; note: string }[];
+  recoveries: { kind: "advance_recovery" | "other_deduction"; amount: Chhertum; note: string }[];
 };
 
 export type PayResult = {

@@ -10,6 +10,7 @@ import { RequestLeaveSheet } from "@/components/leave/request-sheet";
 import { WhosOut } from "@/components/leave/whos-out";
 import { Page } from "@/components/page";
 import { requireUser } from "@/lib/auth/session";
+import { lockedRange } from "@/modules/run/repository";
 import { monthBounds, monthFromParam, thimphuToday } from "@/lib/format";
 import { requestLeave } from "@/modules/leave/actions";
 import { balancesFor, holidaysInYear, loadLeaveContext, sheetContextFor, unseenDecisions, unseenNotices, whoIsOut } from "@/modules/leave/repository";
@@ -23,7 +24,7 @@ export default async function LeavePage({ searchParams }: LeavePageProps) {
   const today = thimphuToday();
   const month = monthFromParam((await searchParams).month, today);
   const context = user.personId ? await loadLeaveContext(user, user.personId) : null;
-  const sheet = context ? sheetContextFor(context) : null;
+  const sheet = context ? sheetContextFor(context, await lockedRange(user)) : null;
 
   const { from, to } = monthBounds(month);
   const [out, monthHolidays, unseen, notices] = await Promise.all([

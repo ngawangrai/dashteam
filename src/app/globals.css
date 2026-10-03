@@ -218,7 +218,43 @@
   }
 }
 
+/*
+ * Hold to lock. The fill sweeps left to right at a constant speed (linear: it is a measure of time),
+ * and snaps back quickly if the press ends early.
+ */
+/* Pressed while held: the same quick press as every button, kept for the whole hold. */
+.hold {
+  transition: transform 160ms var(--ease-out);
+}
+.hold[data-holding] {
+  transform: scale(0.98);
+}
+.hold-fill {
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 200ms var(--ease-out);
+}
+.hold[data-holding] .hold-fill {
+  clip-path: inset(0 0 0 0);
+  transition: clip-path var(--hold-ms, 1500ms) linear;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* No sweep: the fill fades in over the same time, so holding still reads as progress. */
+  .hold-fill,
+  .hold[data-holding] .hold-fill {
+    clip-path: none;
+  }
+  .hold[data-holding] {
+    transform: none;
+  }
+  .hold-fill {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  .hold[data-holding] .hold-fill {
+    opacity: 1;
+    transition: opacity var(--hold-ms, 1500ms) linear;
+  }
   .sheet,
   .sheet:not([open]) {
     transform: none;

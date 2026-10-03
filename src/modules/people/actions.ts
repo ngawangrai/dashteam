@@ -12,6 +12,7 @@ import { firstOfMonth, formatDate, formatMonth, monthOf } from "@/lib/format";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
 import { firstNameFrom } from "@/lib/auth/roles";
+import { lockedMessage, lockedMonthsIn } from "@/modules/run/locked";
 import { thisMonth } from "./repository";
 import { type PayFields, changeRequestSchema, exitSchema, newPersonSchema, payChangeSchema, personDetailsSchema } from "./schema";
 
@@ -44,6 +45,14 @@ function payColumns(pay: PayFields) {
 
 function encrypted(personId: string, field: EncryptedField, value: string) {
   return { ciphertext: encryptField(value, { personId, field }), last4: lastFour(value) };
+}
+
+/** A change inside a locked payroll month, refused by the database, in words that say what to do instead. */
+function lockedError(error: unknown, field: string): ActionState | null {
+  const months = lockedMonthsIn(error);
+  if (!months) return null;
+  const message = lockedMessage(months, "admin");
+  return { status: "error", message, fieldErrors: { [field]: message } };
 }
 
 const isUniqueViolation = (error: unknown, constraint: string) =>
@@ -119,6 +128,8 @@ export async function addPerson(_previous: ActionState, formData: FormData): Pro
     };
   } catch (error) {
     if (createdLogin && profileId) await supabaseAdmin.auth.admin.deleteUser(profileId);
+    const locked = lockedError(error, "startDate");
+    if (locked) return locked;
     if (isUniqueViolation(error, "people_profile_id_unique")) {
       return { status: "error", message: "Check the highlighted fields.", fieldErrors: { email: "This sign-in already belongs to someone in DashTeam." } };
     }
@@ -176,11 +187,11 @@ export async function updatePerson(personId: string, _previous: ActionState, for
     revalidatePath(`/admin/people/${personId}`);
     revalidatePath("/admin/people");
     return { status: "done", message: "Changes saved.", transactionId, redirectTo: `/admin/people/${personId}` };
-  } catch {
+  } catch (error) {
     if (emailChanged && current.profileId) {
       await supabaseAdmin.auth.admin.updateUserById(current.profileId, { email: current.email, email_confirm: true });
     }
-    return { status: "error", message: SAVE_FAILED };
+    return lockedError(error, "startDate") ?? { status: "error", message: SAVE_FAILED };
   }
 }
 
@@ -214,6 +225,8 @@ export async function changePay(personId: string, _previous: ActionState, formDa
       redirectTo: `/admin/people/${personId}`,
     };
   } catch (error) {
+    const locked = lockedError(error, "effectiveFrom");
+    if (locked) return locked;
     if (isUniqueViolation(error, "pay_records_person_effective_from")) {
       return {
         status: "error",
@@ -250,8 +263,8 @@ export async function markAsLeft(personId: string, _previous: ActionState, formD
       transactionId,
       redirectTo: `/admin/people/${personId}`,
     };
-  } catch {
-    return { status: "error", message: SAVE_FAILED };
+  } catch (error) {
+    return lockedError(error, "endDate") ?? { status: "error", message: SAVE_FAILED };
   }
 }
 

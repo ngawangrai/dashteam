@@ -32,9 +32,13 @@ export const LEAVE_RULE_KEYS = [
   "leave_exit_payout",
 ] as const satisfies readonly LeaveRuleKey[];
 
-export type RuleKey = PayrollRuleKey | LeaveRuleKey;
+// Company-wide payroll settings (milestone 4). Stored for both employment types and written together.
+export type SettingsRuleKey = "payroll_settings";
+export const SETTINGS_RULE_KEYS = ["payroll_settings"] as const satisfies readonly SettingsRuleKey[];
+
+export type RuleKey = PayrollRuleKey | LeaveRuleKey | SettingsRuleKey;
 // Order matters: it is the order of the database enum, which only ever grows at the end.
-export const RULE_KEYS = [...PAYROLL_RULE_KEYS, ...LEAVE_RULE_KEYS] as const satisfies readonly RuleKey[];
+export const RULE_KEYS = [...PAYROLL_RULE_KEYS, ...LEAVE_RULE_KEYS, ...SETTINGS_RULE_KEYS] as const satisfies readonly RuleKey[];
 
 /** Integer chhertum. 1 Nu. = 100 Ch. Never a float. */
 export type Chhertum = number;
@@ -146,7 +150,20 @@ export type LeaveRuleValues = {
   leave_exit_payout: { enabled: boolean };
 };
 
-export type RuleValues = PayrollRuleValues & LeaveRuleValues;
+export type SettingsRuleValues = {
+  payroll_settings: {
+    /** The first month DashTeam pays. Null until the admin sets it. Earlier months are never run here. */
+    firstMonth: PayrollMonth | null;
+    /** A take-home this far up or down from last month is flagged on the review screen. */
+    largeChange: BasisPoints;
+    /** TDS and HC for a month are due on this day of the next month. */
+    dueDay: number;
+  };
+};
+
+export type RuleValues = PayrollRuleValues & LeaveRuleValues & SettingsRuleValues;
+
+export type PayrollSettings = SettingsRuleValues["payroll_settings"] & { ruleIds: string[] };
 
 /** Every leave rule in force for one employment type in one month. */
 export type ResolvedLeaveRules = {

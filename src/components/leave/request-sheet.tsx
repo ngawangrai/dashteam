@@ -9,7 +9,7 @@ import { Sheet } from "@/components/sheet";
 import { confirmWithUndo } from "@/components/undo-toast";
 import { formatDays, formatSpan } from "@/lib/format";
 import type { LeaveActionState } from "@/modules/leave/actions";
-import { type Employment, type LeaveRequestFacts, assessRequest } from "@/modules/leave/balance";
+import { type Employment, type LeaveRequestFacts, type LockedRange, assessRequest } from "@/modules/leave/balance";
 import type { LeaveCalendar } from "@/modules/leave/days";
 import { LEAVE_TYPE_NAME } from "@/modules/leave/labels";
 import { type ChildOrder, type EmploymentType, LEAVE_TYPES, type LeavePolicy, type LeaveType, type RuleRow } from "@/modules/rules/types";
@@ -24,6 +24,8 @@ export type LeaveSheetContext = {
   /** What this person can take today, in display order. */
   policy: LeavePolicy;
   today: string;
+  /** Locked payroll months: leave there is refused before it's sent. */
+  locked?: LockedRange;
 };
 
 type RequestSheetProps = {
@@ -83,7 +85,14 @@ export function RequestLeaveSheet({ context, action, forName, triggerLabel = "Re
     start && end && policy
       ? assessRequest(
           { leaveType, startDate: start, endDate: end, ...halves, childOrder: needsChild ? childOrder : null, eventDate: eventDate || null },
-          { employmentType: context.employmentType, person: context.person, requests: context.requests, ruleRows: context.ruleRows, calendar: context.calendar },
+          {
+            employmentType: context.employmentType,
+            person: context.person,
+            requests: context.requests,
+            ruleRows: context.ruleRows,
+            calendar: context.calendar,
+            locked: context.locked,
+          },
         )
       : null;
 

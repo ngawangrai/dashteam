@@ -7,6 +7,7 @@ import {
   type ImpactRequest,
   copyFixedHolidays,
   expandHolidays,
+  holidayChangeLockedMonth,
   holidayImpact,
   holidayLabel,
   holidaysByDate,
@@ -161,5 +162,30 @@ describe("the seeded holidays", () => {
     expect(V1_HOLIDAYS.filter((h) => h.year === 2027 && h.status === "tentative")).toHaveLength(17);
     expect(V1_HOLIDAYS.every((h) => h.source.startsWith("https://"))).toBe(true);
     expect(V1_HOLIDAYS.every((h) => h.startDate.startsWith(String(h.year)) && h.endDate >= h.startDate)).toBe(true);
+  });
+});
+
+describe("holiday changes in a locked payroll month", () => {
+  const OCTOBER = { year: 2026, month: 10 };
+  const dashain = { id: "dashain", name: "Dashain", startDate: "2026-10-21", endDate: "2026-10-21", year: 2026, kind: "lunar" as const, scope: "national" as const, status: "tentative" as const, source: "test", note: "" };
+  const values = (fields: Partial<typeof dashain>) => ({ ...dashain, ...fields });
+
+  it("refuses adding, moving, renaming or removing a holiday there", () => {
+    expect(holidayChangeLockedMonth({ mode: "add", values: values({ startDate: "2026-10-28", endDate: "2026-10-28" }) }, [dashain], [OCTOBER])).toEqual(OCTOBER);
+    expect(holidayChangeLockedMonth({ mode: "edit", id: "dashain", values: values({ startDate: "2026-11-04", endDate: "2026-11-04" }) }, [dashain], [OCTOBER])).toEqual(OCTOBER);
+    expect(holidayChangeLockedMonth({ mode: "edit", id: "dashain", values: values({ name: "Dasain" }) }, [dashain], [OCTOBER])).toEqual(OCTOBER);
+    expect(holidayChangeLockedMonth({ mode: "remove", id: "dashain" }, [dashain], [OCTOBER])).toEqual(OCTOBER);
+  });
+
+  it("refuses moving a holiday into a locked month", () => {
+    const later = { ...dashain, id: "later", startDate: "2026-11-04", endDate: "2026-11-04" };
+    expect(holidayChangeLockedMonth({ mode: "edit", id: "later", values: values({ startDate: "2026-10-30", endDate: "2026-10-30" }) }, [later], [OCTOBER])).toEqual(OCTOBER);
+  });
+
+  it("allows confirming a date, changing only its source or note, and anything in an open month", () => {
+    expect(holidayChangeLockedMonth({ mode: "confirm", id: "dashain" }, [dashain], [OCTOBER])).toBeNull();
+    expect(holidayChangeLockedMonth({ mode: "edit", id: "dashain", values: values({}) }, [dashain], [OCTOBER])).toBeNull();
+    expect(holidayChangeLockedMonth({ mode: "add", values: values({ startDate: "2026-11-11", endDate: "2026-11-11" }) }, [dashain], [OCTOBER])).toBeNull();
+    expect(holidayChangeLockedMonth({ mode: "remove", id: "dashain" }, [dashain], [])).toBeNull();
   });
 });

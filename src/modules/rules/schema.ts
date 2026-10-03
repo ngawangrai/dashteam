@@ -134,6 +134,24 @@ const prorationCutoff = z.object({ day: z.number().int().min(1).max(28) }).stric
 const leaveBackdate = z.object({ months: z.number().int().min(0).max(12) }).strict();
 const leaveExitPayout = z.object({ enabled: z.boolean() }).strict();
 
+// ── Payroll settings ──────────────────────────────────────────────────────────
+
+const payrollSettings = z
+  .object({
+    first_month: z
+      .string()
+      .regex(/^\d{4}-(0[1-9]|1[0-2])-01$/, "The first month is stored as its 1st")
+      .nullable(),
+    large_change_bp: z.number().int().positive(),
+    due_day: z.number().int().min(1).max(28),
+  })
+  .strict()
+  .transform((value) => ({
+    firstMonth: value.first_month ? { year: Number(value.first_month.slice(0, 4)), month: Number(value.first_month.slice(5, 7)) } : null,
+    largeChange: value.large_change_bp,
+    dueDay: value.due_day,
+  }));
+
 const schemas = {
   tds,
   health_contribution: healthContribution,
@@ -147,6 +165,7 @@ const schemas = {
   proration_cutoff: prorationCutoff,
   leave_backdate: leaveBackdate,
   leave_exit_payout: leaveExitPayout,
+  payroll_settings: payrollSettings,
 } satisfies { [K in RuleKey]: z.ZodType<RuleValues[K]> };
 
 export function parseRuleValue<K extends RuleKey>(key: K, value: unknown): RuleValues[K] {

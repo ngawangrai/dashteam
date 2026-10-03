@@ -9,7 +9,7 @@ import { toPayView } from "@/modules/people/repository";
 import { loadRuleRows } from "@/modules/rules/repository";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
 import { type EmploymentType, LEAVE_TYPES, type LeaveType, type RuleRow } from "@/modules/rules/types";
-import { type Balance, type Employment, type LeaveRequestFacts, balanceFor } from "./balance";
+import { type Balance, type Employment, type LeaveRequestFacts, type LockedRange, balanceFor } from "./balance";
 import { type LeaveCalendar, countLeaveDays } from "./days";
 import { type ExitSettlement, exitSettlement } from "./exit";
 import { type Holiday, type ImpactRequest, expandHolidays, holidayLabel, holidaysByDate, tentativeDates } from "./holidays";
@@ -396,7 +396,7 @@ export async function exitLeaveFor(user: SessionUser, personId: string): Promise
 }
 
 /** What the request sheet needs to check a request live, in the browser, exactly as the server will. */
-export function sheetContextFor(context: LeaveContext) {
+export function sheetContextFor(context: LeaveContext, locked: LockedRange | null = null) {
   if (!context.employmentType) return null;
   const today = thimphuToday();
   let policy;
@@ -422,5 +422,6 @@ export function sheetContextFor(context: LeaveContext) {
     calendar: context.calendar,
     policy,
     today,
+    locked: locked ?? undefined,
   };
 }

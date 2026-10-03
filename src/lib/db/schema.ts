@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { authUid, authUsers, authenticatedRole } from "drizzle-orm/supabase";
 import { EMPLOYMENT_TYPES, LEAVE_TYPES, RULE_KEYS } from "@/modules/rules/types";
+import { LINE_KINDS, LINE_SOURCES } from "@/modules/run/lines";
 
 // Interns sign in as employees; "intern" is an employment type, not a role.
 export const appRole = pgEnum("app_role", ["admin", "employee"]);
@@ -82,6 +83,18 @@ export const rules = pgTable(
       for: "select",
       to: authenticatedRole,
       using: sql`(select public.has_access())`,
+    }),
+    // The one rule an admin sets in the app: payroll settings (the first month), from the Payroll screen.
+    // Rates and leave policy are still changed only by a migration. Audited by trigger.
+    pgPolicy("rules_insert_settings_admin", {
+      for: "insert",
+      to: authenticatedRole,
+      withCheck: sql`(select public.is_admin()) and ${table.key} = 'payroll_settings'`,
+    }),
+    pgPolicy("rules_delete_settings_admin", {
+      for: "delete",
+      to: authenticatedRole,
+      using: sql`(select public.is_admin()) and ${table.key} = 'payroll_settings'`,
     }),
   ],
 ).enableRLS();
@@ -443,3 +456,139 @@ export const leaveNotices = pgTable(
 ).enableRLS();
 
 export type LeaveNotice = typeof leaveNotices.$inferSelect;
+
+// ── Payroll runs (milestone 4) ──────────────────────────────────────────────────
+// A month is a draft until it is locked. Drafts store no figures: they are worked out on every read
+// from the inputs. Locking writes a snapshot per person and freezes the month for good. Every change
+// inside a locked month is refused by triggers (custom migration), even for the database owner.
+
+export const payrollRunStatus = pgEnum("payroll_run_status", ["draft", "locked"]);
+export const payrollLineKind = pgEnum("payroll_line_kind", LINE_KINDS);
+export const payrollLineSource = pgEnum("payroll_line_source", LINE_SOURCES);
+
+const adminOnly = (name: string) =>
+  pgPolicy(name, { for: "all", to: authenticatedRole, using: sql`(select public.is_admin())`, withCheck: sql`(select public.is_admin())` });
+
+export const payrollRuns = pgTable(
+  "payroll_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    month: date("month").notNull(),
+    status: payrollRunStatus("status").notNull().default("draft"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedBy: uuid("locked_by").references(() => authUsers.id),
+    // Totals as locked, so the run list and remittance never need the snapshots.
+    peopleCount: integer("people_count"),
+    grossCh: bigint("gross_ch", { mode: "number" }),
+    healthContributionCh: bigint("health_contribution_ch", { mode: "number" }),
+    providentFundCh: bigint("provident_fund_ch", { mode: "number" }),
+    gisCh: bigint("gis_ch", { mode: "number" }),
+    tdsCh: bigint("tds_ch", { mode: "number" }),
+    recoveriesCh: bigint("recoveries_ch", { mode: "number" }),
+    takeHomeCh: bigint("take_home_ch", { mode: "number" }),
+    // TDS + HC, paid to DRC by the due date.
+    remitCh: bigint("remit_ch", { mode: "number" }),
+    dueDate: date("due_date"),
+    ruleIds: text("rule_ids").array(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("payroll_runs_month").on(table.month),
+    check("payroll_runs_first_of_month", sql`extract(day from ${table.month}) = 1`),
+    check(
+      "payroll_runs_locked_complete",
+      sql`${table.status} = 'draft' or (${table.lockedAt} is not null and ${table.peopleCount} is not null and ${table.grossCh} is not null
+        and ${table.healthContributionCh} is not null and ${table.providentFundCh} is not null and ${table.gisCh} is not null
+        and ${table.tdsCh} is not null and ${table.recoveriesCh} is not null and ${table.takeHomeCh} is not null
+        and ${table.remitCh} is not null and ${table.dueDate} is not null and ${table.ruleIds} is not null)`,
+    ),
+    adminOnly("payroll_runs_admin"),
+  ],
+).enableRLS();
+
+export type PayrollRun = typeof payrollRuns.$inferSelect;
+
+// One-off lines on a person's pay for one month. Keyed by month rather than run, so a draft needs no row.
+export const payrollLines = pgTable(
+  "payroll_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    month: date("month").notNull(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    kind: payrollLineKind("kind").notNull(),
+    amountCh: bigint("amount_ch", { mode: "number" }).notNull(),
+    note: text("note").notNull().default(""),
+    source: payrollLineSource("source").notNull().default("manual"),
+    createdBy: uuid("created_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("payroll_lines_month").on(table.month),
+    check("payroll_lines_first_of_month", sql`extract(day from ${table.month}) = 1`),
+    check("payroll_lines_amount_positive", sql`${table.amountCh} > 0`),
+    adminOnly("payroll_lines_admin"),
+  ],
+).enableRLS();
+
+export type PayrollLine = typeof payrollLines.$inferSelect;
+
+// A pre-lock check the admin has looked at and decided is fine.
+export const payrollAcknowledgements = pgTable(
+  "payroll_acknowledgements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    month: date("month").notNull(),
+    checkKey: text("check_key").notNull(),
+    note: text("note").notNull().default(""),
+    acknowledgedBy: uuid("acknowledged_by").references(() => authUsers.id),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("payroll_acknowledgements_month_check").on(table.month, table.checkKey),
+    check("payroll_acknowledgements_first_of_month", sql`extract(day from ${table.month}) = 1`),
+    adminOnly("payroll_acknowledgements_admin"),
+  ],
+).enableRLS();
+
+// Everything a locked month used for one person, as it was: every input and figure, the rules
+// version, and their name, type, TPN and bank details. Never updated or removed.
+// TPN and bank account are the same ciphertext as on the person (bound to person and field), so they stay readable.
+export const payrollSnapshots = pgTable(
+  "payroll_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    fullName: text("full_name").notNull(),
+    email: text("email").notNull(),
+    employmentType: employmentType("employment_type").notNull(),
+    // Phone, bank name, and TPN and bank account (ciphertext and last 4) as they were at lock.
+    person: jsonb("person").notNull(),
+    // Pay terms, dates, unpaid days, one-off lines and the exact payroll input.
+    inputs: jsonb("inputs").notNull(),
+    // The full payroll result.
+    result: jsonb("result").notNull(),
+    ruleIds: text("rule_ids").array().notNull(),
+    grossCh: bigint("gross_ch", { mode: "number" }).notNull(),
+    healthContributionCh: bigint("health_contribution_ch", { mode: "number" }).notNull(),
+    providentFundCh: bigint("provident_fund_ch", { mode: "number" }).notNull(),
+    gisCh: bigint("gis_ch", { mode: "number" }).notNull(),
+    tdsCh: bigint("tds_ch", { mode: "number" }).notNull(),
+    recoveriesCh: bigint("recoveries_ch", { mode: "number" }).notNull(),
+    takeHomeCh: bigint("take_home_ch", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("payroll_snapshots_run_person").on(table.runId, table.personId),
+    // Milestone 5 adds a policy so people can read their own.
+    adminOnly("payroll_snapshots_admin"),
+  ],
+).enableRLS();
+
+export type PayrollSnapshot = typeof payrollSnapshots.$inferSelect;
