@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { db, expectNoSideways, signIn, signOut } from "./helpers";
+import { emailDetail, waitForEmails } from "./mailpit";
 
 // Milestone 4 end to end: set the first month, review everyone, adjust one-offs inline with Undo,
 // clear and acknowledge the checks, hold to lock, read the locked month and its bank list, and see
@@ -35,21 +36,35 @@ const money = (chhertum: number) => {
 async function clearPayroll() {
   await db.begin(async (tx) => {
     await tx`set local session_replication_role = replica`;
+    await tx`delete from public.email_deliveries where payslip_id is not null`;
+    await tx`delete from public.payslips`;
     await tx`delete from public.payroll_snapshots`;
     await tx`delete from public.payroll_runs`;
     await tx`delete from public.payroll_lines`;
     await tx`delete from public.payroll_acknowledgements`;
     await tx`delete from public.rules where key = 'payroll_settings' and effective_from > '2026-01-01'`;
   });
-  await db`delete from public.people where email like 'nopay.%@dashteam.local'`;
+  await db`delete from public.people where email like 'nopay.%@dashteam.local' or email like 'bounce.%'`;
 }
 
+// Someone paid this month whose payslip email fails at first (the local Mailpit route refuses this
+// domain on purpose), so the spec can see a failure, fix it and try again.
+let BOUNCE = "";
+let BOUNCE_FIXED = "";
+
 test.describe.configure({ mode: "serial" });
-test.beforeAll(clearPayroll);
+test.beforeAll(async ({}, testInfo) => {
+  await clearPayroll();
+  const stamp = `${testInfo.project.name}.${Date.now()}`;
+  BOUNCE = `bounce.${stamp}@fail.dashteam.local`;
+  BOUNCE_FIXED = `bounce.${stamp}@dashteam.local`;
+  const [person] = await db<{ id: string }[]>`insert into public.people (full_name, email, start_date) values ('Ugyen Bounce', ${BOUNCE}, '2026-01-05') returning id`;
+  await db`insert into public.pay_records (person_id, effective_from, employment_type, basic_ch, allowances_ch) values (${person?.id ?? ""}, '2026-01-01', 'full_time', 3000000, 0)`;
+});
 test.afterAll(clearPayroll);
 
 async function openSonam(page: Page) {
-  await page.getByRole("button", { name: /Sonam Wangmo/ }).click();
+  await page.getByRole("button", { name: /^Sonam Wangmo/ }).click();
   const sheet = page.getByRole("dialog", { name: "Sonam Wangmo" });
   await expect(sheet).toBeVisible();
   return sheet;
@@ -66,7 +81,7 @@ test("an admin sets the first month and sees everyone worked out", async ({ page
   await expect(page).toHaveURL(new RegExp(`/admin/payroll/${KEY}$`));
   await expect(page.getByText(`DashTeam pays from ${NAME} ${YEAR}.`)).toBeVisible();
   await expect(page.getByRole("heading", { name: `${NAME} ${YEAR}`, level: 1 })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Sonam Wangmo/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Sonam Wangmo/ })).toBeVisible();
   // The one primary action.
   await expect(page.getByRole("link", { name: `Lock ${NAME} payroll` })).toBeVisible();
   await expectNoSideways(page);
@@ -86,7 +101,7 @@ test("one-offs are added inline, undone, and an advance recovery leaves TDS and 
   await sheet.getByRole("button", { name: "Add arrear of Nu. 5,000" }).click();
   await expect(page.getByText(/^Arrear of Nu\. 5,000 added\. Sonam’s take-home is now Nu\. [\d,]+\.$/)).toBeVisible();
   await expect(sheet).toBeHidden();
-  const sonamRow = page.getByRole("button", { name: /Sonam Wangmo/ });
+  const sonamRow = page.getByRole("button", { name: /^Sonam Wangmo/ });
   await expect(page.getByText("1 one-off").filter({ visible: true })).toBeVisible();
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("Undone.")).toBeVisible();
@@ -183,6 +198,98 @@ test("holding locks the month; letting go early doesn't", async ({ page }, testI
   await expect(page.getByText(/^Locked on /)).toBeVisible();
 });
 
+test("locking makes a payslip for everyone and emails each person once", async ({ page }, testInfo) => {
+  const lockedAt = await db<{ locked_at: Date }[]>`select locked_at from public.payroll_runs where month = ${FIRST_DAY} and status = 'locked'`;
+  const since = new Date((lockedAt[0]?.locked_at ?? new Date()).getTime() - 2_000);
+  const subject = `Your ${NAME} ${YEAR} payslip`;
+
+  // A payslip for every snapshot, made from it.
+  await expect
+    .poll(async () => (await db`select count(*)::int as n from public.payslips p join public.payroll_runs r on r.id = p.run_id where r.month = ${FIRST_DAY}`)[0]?.n, { timeout: 20_000 })
+    .toBe((await db`select count(*)::int as n from public.payroll_snapshots s join public.payroll_runs r on r.id = s.run_id where r.month = ${FIRST_DAY}`)[0]?.n);
+
+  // Sonam's arrives once, with the PDF attached.
+  const sonam = await waitForEmails("employee@dashteam.local", since, subject);
+  expect(sonam).toHaveLength(1);
+  const detail = await emailDetail(sonam[0]?.ID ?? "");
+  expect(detail.Text).toContain("payslip for");
+  expect(detail.Attachments).toEqual([expect.objectContaining({ FileName: `Payslip ${NAME} ${YEAR}.pdf`, ContentType: "application/pdf" })]);
+
+  // The admin sees who doesn't have it yet; the failure leaves the month locked.
+  await signIn(page, ADMIN);
+  await page.goto(`/admin/payroll/${KEY}`);
+  const needsYou = page.getByRole("list", { name: "Payslips that need you" });
+  const bounceRow = needsYou.getByRole("listitem").filter({ hasText: "Ugyen Bounce" });
+  await expect(bounceRow).toContainText("couldn’t send to this address", { timeout: 20_000 });
+  await expect(needsYou.getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByText(/emailed\. 1 needs you\./)).toBeVisible();
+  expect(await db`select id from public.payroll_runs where month = ${FIRST_DAY} and status = 'locked'`).toHaveLength(1);
+  await expectNoSideways(page);
+  await testInfo.attach("payslip-status", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+
+  // Fix their email and try again: they get exactly one, and nobody else gets a second.
+  await db`update public.people set email = ${BOUNCE_FIXED} where email = ${BOUNCE}`;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText(/^Emailed to all \d+ people\.$/)).toBeVisible({ timeout: 20_000 });
+  await expect(needsYou).toHaveCount(0);
+  expect(await waitForEmails(BOUNCE_FIXED, since, subject)).toHaveLength(1);
+  expect(await waitForEmails("employee@dashteam.local", since, subject, 2, 2_000)).toHaveLength(1);
+
+  // Sending it again, on purpose, sends exactly one more.
+  await page.getByRole("button", { name: /^Sonam Wangmo/ }).click();
+  const sheet = page.getByRole("dialog", { name: `${NAME} ${YEAR}, Sonam Wangmo` });
+  await expect(sheet.getByText("Take-home")).toBeVisible();
+  await sheet.getByRole("button", { name: "Send it again" }).click();
+  await expect(page.getByText("Sent to employee@dashteam.local.")).toBeVisible();
+  expect(await waitForEmails("employee@dashteam.local", since, subject, 2)).toHaveLength(2);
+});
+
+test("an employee opens and downloads their payslip in two taps, and can't open anyone else's", async ({ page }, testInfo) => {
+  // The admin's link to someone else's payslip, to try as the employee.
+  await signIn(page, ADMIN);
+  await page.goto(`/admin/payroll/${KEY}`);
+  await page.getByRole("button", { name: /^Ugyen Bounce/ }).click();
+  const adminSheet = page.getByRole("dialog", { name: /Ugyen Bounce/ });
+  const download = adminSheet.getByRole("link", { name: "Download PDF" });
+  await expect(download).toHaveAttribute("href", /^\/payslips\/file\//);
+  const othersLink = (await download.getAttribute("href")) ?? "";
+  const asAdmin = await page.request.get(othersLink);
+  expect(asAdmin.headers()["content-type"]).toBe("application/pdf");
+  await signOut(page);
+
+  await signIn(page, EMPLOYEE);
+  // Home shows the latest payslip.
+  const latest = page.getByRole("link", { name: new RegExp(`${NAME} ${YEAR}`) });
+  await expect(latest).toBeVisible();
+  await page.goto("/payslips");
+  await page.waitForLoadState("networkidle");
+  // Tap one: the month. Tap two: Download PDF.
+  await page.getByRole("button", { name: new RegExp(`^${NAME}`) }).click();
+  const sheet = page.getByRole("dialog", { name: `${NAME} ${YEAR}` });
+  await expect(sheet.getByText("Take-home").first()).toBeVisible();
+  const own = sheet.getByRole("link", { name: "Download PDF" });
+  await expect(own).toHaveAttribute("href", /^\/payslips\/file\//);
+  const pdf = await page.request.get((await own.getAttribute("href")) ?? "");
+  expect(pdf.headers()["content-type"]).toBe("application/pdf");
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe("%PDF-");
+  await expectNoSideways(page);
+  await testInfo.attach("employee-payslip", { body: await page.screenshot(), contentType: "image/png" });
+
+  // Email it to me.
+  const since = new Date(Date.now() - 2_000);
+  await sheet.getByRole("button", { name: "Email it to me" }).click();
+  await expect(page.getByText("Sent to employee@dashteam.local.")).toBeVisible();
+  const mine = await waitForEmails("employee@dashteam.local", since, `Your ${NAME} ${YEAR} payslip`);
+  expect((await emailDetail(mine[0]?.ID ?? "")).Text).toContain("as you asked");
+
+  // Someone else's link, or a made-up one, gets the same refusal.
+  for (const link of [othersLink, "/payslips/file/not-a-real-link"]) {
+    await page.goto(link);
+    await expect(page).toHaveURL(/\/payslips\/unavailable$/);
+    await expect(page.getByText("This link has expired or isn’t yours")).toBeVisible();
+  }
+});
+
 test("the locked month and its bank list match the snapshot", async ({ page }, testInfo) => {
   await signIn(page, ADMIN);
   await page.goto(`/admin/payroll/${KEY}`);
@@ -191,7 +298,7 @@ test("the locked month and its bank list match the snapshot", async ({ page }, t
     where r.month = ${FIRST_DAY} order by s.full_name`;
   expect(snapshots.length).toBeGreaterThan(0);
   const sonam = snapshots.find((s) => s.full_name === "Sonam Wangmo");
-  await expect(page.getByRole("button", { name: /Sonam Wangmo/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Sonam Wangmo/ })).toBeVisible();
   // Laptop: the table row; phone: the list row. Either shows the locked take-home.
   await expect(page.getByText(money(Number(sonam?.take_home_ch ?? 0))).filter({ visible: true }).first()).toBeVisible();
   await expectNoSideways(page);
@@ -219,9 +326,9 @@ test("a change inside the locked month is refused, saying what to do instead", a
   // The admin can't add a one-off to the locked month any more: it's read-only.
   await signIn(page, ADMIN);
   await page.goto(`/admin/payroll/${KEY}`);
-  await page.getByRole("button", { name: /Sonam Wangmo/ }).click();
-  const sheet = page.getByRole("dialog", { name: "Sonam Wangmo" });
-  await expect(sheet.getByText(`${NAME} is locked, so this can’t change.`)).toBeVisible();
+  await page.getByRole("button", { name: /^Sonam Wangmo/ }).click();
+  const sheet = page.getByRole("dialog", { name: `${NAME} ${YEAR}, Sonam Wangmo` });
+  await expect(sheet.getByRole("link", { name: "Download PDF" })).toBeVisible();
   await expect(sheet.getByLabel("Amount (Nu.)")).toHaveCount(0);
   await signOut(page);
 

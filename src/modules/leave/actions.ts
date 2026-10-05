@@ -2,6 +2,7 @@
 
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import type { z } from "zod";
 import { firstNameFrom } from "@/lib/auth/roles";
 import { claimsFor, requireRole, requireUser, type SessionUser } from "@/lib/auth/session";
@@ -9,6 +10,7 @@ import { asUser, type Tx } from "@/lib/db/client";
 import { exitLeaveSettlements, leaveNotices, leaveRequests, payrollLines, people } from "@/lib/db/schema";
 import { addMonths, firstOfMonth, formatDate, formatDays, formatMonth, formatSpan, monthOf, thimphuToday } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
+import { notifyLeave } from "@/modules/documents/issue";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
 import { lockedMessage, lockedMonthsIn } from "@/modules/run/locked";
 import { lockedRange } from "@/modules/run/repository";
@@ -80,7 +82,7 @@ async function sendRequest(user: SessionUser, personId: string, formData: FormDa
       if (!assessment.ok) return { error: assessment.reason };
 
       await labelNextWrites(tx, mode === "own" ? "leave.requested" : "leave.entered");
-      await tx.insert(leaveRequests).values({
+      const [inserted] = await tx.insert(leaveRequests).values({
         personId,
         leaveType: request.leaveType,
         startDate: request.startDate,
@@ -94,11 +96,13 @@ async function sendRequest(user: SessionUser, personId: string, formData: FormDa
         status: mode === "admin" ? "approved" : "pending",
         requestedBy: user.id,
         ...(mode === "admin" ? { decidedBy: user.id, decidedAt: new Date() } : {}),
-      });
-      return { days: assessment.days, transactionId: await currentTransactionId(tx) };
+      }).returning({ id: leaveRequests.id });
+      return { days: assessment.days, requestId: inserted?.id ?? "", transactionId: await currentTransactionId(tx) };
     });
 
     if ("error" in result) return { status: "error", message: result.error ?? SAVE_FAILED };
+    // The admins hear about a request; the person hears about leave an admin entered for them.
+    after(() => notifyLeave(result.requestId, mode === "own" ? "leave_requested" : "leave_decided", user));
     revalidatePath("/", "layout");
     const what = describe(request.leaveType, result.days, request.startDate, request.endDate);
     return {
@@ -144,6 +148,7 @@ export async function decideLeave(requestId: string, decision: "approved" | "dec
       return { name: firstNameFrom(row.name, row.email), transactionId: await currentTransactionId(tx) };
     });
     if (!result) return { status: "error", message: "This request was already decided or cancelled." };
+    after(() => notifyLeave(requestId, "leave_decided", admin));
     revalidatePath("/", "layout");
     return {
       status: "done",

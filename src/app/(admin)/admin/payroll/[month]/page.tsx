@@ -5,12 +5,14 @@ import { EmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icon";
 import { InsetSection } from "@/components/inset-section";
 import { Page } from "@/components/page";
+import { DeliveryList } from "@/components/documents/delivery-list";
 import { ChecksList } from "@/components/run/checks-list";
 import { DraftReview } from "@/components/run/draft-review";
 import { LockedReview } from "@/components/run/locked-review";
 import { RunTotals } from "@/components/run/run-totals";
 import { requireRole } from "@/lib/auth/session";
 import { formatDate, formatMonth, thimphuToday } from "@/lib/format";
+import { deliveryStatus } from "@/modules/documents/repository";
 import { monthIndex } from "@/modules/run/build";
 import { monthFromKey } from "@/modules/run/months";
 import { draftRun, lockedRun, payrollOverview } from "@/modules/run/repository";
@@ -32,6 +34,7 @@ export default async function PayrollMonthPage({ params }: Params) {
   const locked = await lockedRun(user, month);
   if (locked) {
     const { run, people } = locked;
+    const deliveries = await deliveryStatus(user, run.id);
     return (
       <Page
         title={title}
@@ -61,8 +64,14 @@ export default async function PayrollMonthPage({ params }: Params) {
             remit: run.remitCh ?? 0,
           }}
         />
+        {people.length ? <DeliveryList runId={run.id} rows={deliveries} /> : null}
         {people.length ? (
-          <LockedReview people={people} totals={{ gross: run.grossCh ?? 0, takeHome: run.takeHomeCh ?? 0 }} monthName={name} />
+          <LockedReview
+            people={people}
+            totals={{ gross: run.grossCh ?? 0, takeHome: run.takeHomeCh ?? 0 }}
+            monthName={name}
+            payslips={Object.fromEntries(deliveries.flatMap((row) => (row.payslip ? [[row.personId, row.payslip]] : [])))}
+          />
         ) : (
           <InsetSection>
             <EmptyState icon={Users} title={`No one was paid in ${name}`} message="It was locked with no one employed that month." />

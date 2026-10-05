@@ -1,18 +1,29 @@
 "use client";
 
 import { useState } from "react";
+import { PayslipSheet } from "@/components/documents/payslip-sheet";
 import { Money } from "@/components/money";
 import { Sheet } from "@/components/sheet";
 import { maskedLast4 } from "@/lib/format";
 import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
+import type { PayslipListItem } from "@/modules/documents/repository";
 import type { LockedPersonView } from "@/modules/run/repository";
 import { PayBreakdown } from "./pay-breakdown";
 import { ReviewList } from "./review-list";
 
-/** A locked month, read from its snapshot: the same list, and each breakdown exactly as it was locked. */
-export function LockedReview({ people, totals, monthName }: { people: LockedPersonView[]; totals: { gross: number; takeHome: number }; monthName: string }) {
+type LockedReviewProps = {
+  people: LockedPersonView[];
+  totals: { gross: number; takeHome: number };
+  monthName: string;
+  /** Issued payslips by person: once there is one, a row opens it (breakdown, PDF, send again). */
+  payslips: Record<string, PayslipListItem>;
+};
+
+/** A locked month, read from its snapshot: the same list, and each person's payslip a tap away. */
+export function LockedReview({ people, totals, monthName, payslips }: LockedReviewProps) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const open = people.find((person) => person.personId === openId) ?? null;
+  const issued = openId ? payslips[openId] : undefined;
+  const open = !issued ? (people.find((person) => person.personId === openId) ?? null) : null;
   return (
     <>
       <ReviewList
@@ -30,6 +41,8 @@ export function LockedReview({ people, totals, monthName }: { people: LockedPers
         onOpen={setOpenId}
         label={`${monthName} payroll, locked`}
       />
+      <PayslipSheet payslip={issued ?? null} onClose={() => setOpenId(null)} mode="admin" personName={people.find((person) => person.personId === openId)?.fullName} />
+      {/* Before its payslip is made, the snapshot's breakdown. */}
       <Sheet open={open !== null} onClose={() => setOpenId(null)} title={open?.fullName ?? ""}>
         {open ? (
           <div className="flex flex-col gap-5">

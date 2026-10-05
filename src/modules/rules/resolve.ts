@@ -7,6 +7,9 @@ import {
   type PayrollMonth,
   type PayrollRuleValues,
   type PayrollSettings,
+  type CompanyDetails,
+  type SettingsRuleKey,
+  type SettingsRuleValues,
   type ResolvedLeaveRules,
   type ResolvedRules,
   type RuleKey,
@@ -89,15 +92,23 @@ export function resolveLeaveRules(rows: readonly RuleRow[], employmentType: Empl
   };
 }
 
-/**
- * Company-wide payroll settings in force for a month. They are stored for both employment types and
- * written together; if the two ever differ, that is an error rather than a guess.
- */
-export function resolvePayrollSettings(rows: readonly RuleRow[], month: PayrollMonth): PayrollSettings {
-  const fullTime = rulesInForce(rows, ["payroll_settings"], "full_time", month);
-  const intern = rulesInForce(rows, ["payroll_settings"], "intern", month);
-  if (JSON.stringify(fullTime.values.payroll_settings) !== JSON.stringify(intern.values.payroll_settings)) {
-    throw new Error("Payroll settings differ between employment types");
+/** A company-wide setting: stored for both employment types and written together, so the two must agree. */
+function companyWide<K extends SettingsRuleKey>(rows: readonly RuleRow[], key: K, month: PayrollMonth): SettingsRuleValues[K] & { ruleIds: string[] } {
+  const fullTime = rulesInForce(rows, [key], "full_time", month);
+  const intern = rulesInForce(rows, [key], "intern", month);
+  const value = fullTime.values[key] as SettingsRuleValues[K];
+  if (JSON.stringify(value) !== JSON.stringify(intern.values[key])) {
+    throw new Error(`The ${key} rules differ between employment types`);
   }
-  return { ...fullTime.values.payroll_settings, ruleIds: [...fullTime.ruleIds, ...intern.ruleIds] };
+  return { ...value, ruleIds: [...fullTime.ruleIds, ...intern.ruleIds] };
+}
+
+/** Payroll settings in force for a month. */
+export function resolvePayrollSettings(rows: readonly RuleRow[], month: PayrollMonth): PayrollSettings {
+  return companyWide(rows, "payroll_settings", month);
+}
+
+/** The company's name, address and logo as documents for this month show them. */
+export function resolveCompanyDetails(rows: readonly RuleRow[], month: PayrollMonth): CompanyDetails {
+  return companyWide(rows, "company_details", month);
 }

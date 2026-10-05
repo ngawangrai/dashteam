@@ -2,6 +2,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import { firstNameFrom } from "@/lib/auth/roles";
 import { claimsFor, requireRole } from "@/lib/auth/session";
@@ -9,6 +10,7 @@ import { asUser } from "@/lib/db/client";
 import { payrollAcknowledgements, payrollLines, payrollRuns, payrollSnapshots, rules } from "@/lib/db/schema";
 import { addMonths, firstOfMonth, formatMonth, formatNu, parseNu } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
+import { issuePayslipsForMonth } from "@/modules/documents/issue";
 import { thisMonth } from "@/modules/people/repository";
 import { resolvePayrollSettings } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
@@ -272,6 +274,9 @@ export async function lockPayroll(monthKey: string): Promise<LockResult> {
     });
 
     if (outcome === "not_ready") return { status: "error", message: `Some checks still need you. Go back to ${name} to look at them.` };
+    // Payslips are made and emailed once the lock has committed, so nothing about them can fail it.
+    // Safe to schedule again for a month already locked: it only does what's missing.
+    after(() => issuePayslipsForMonth(month, admin));
     revalidatePath("/", "layout");
     if (outcome === "already") return { status: "locked", message: `${name} payroll is already locked.`, redirectTo };
     return { status: "locked", message: `${name} payroll is locked.`, redirectTo };

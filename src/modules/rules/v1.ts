@@ -147,3 +147,17 @@ export const V1_SETTINGS_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as cons
   effectiveFrom: V1_EFFECTIVE_FROM,
   value: V1_SETTINGS_VALUE,
 }));
+
+// ── Company details (milestone 5) ───────────────────────────────────────────────
+// The name only for now: the address and logo are added later as a new dated row.
+
+export const V1_COMPANY_VALUE = { name: "Xceed Studio", address_lines: [], show_logo: false };
+export const V1_COMPANY_NOTE = "Company details on documents. Address and logo to follow";
+
+export const V1_COMPANY_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const).map((employmentType) => ({
+  id: `v1:company_details:${employmentType}`,
+  key: "company_details",
+  employmentType,
+  effectiveFrom: V1_EFFECTIVE_FROM,
+  value: V1_COMPANY_VALUE,
+}));

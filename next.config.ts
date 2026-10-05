@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
   typedRoutes: true,
   // CLAUDE.md is ours; stop `next dev` from appending its own agent rules to it.
   agentRules: false,
+  // react-pdf renders payslips on the server; it runs as plain Node, not bundled.
+  serverExternalPackages: ["@react-pdf/renderer"],
+  // The payslip's embedded fonts (and logo, once added) are read from disk at runtime, so a standalone
+  // build must carry them.
+  outputFileTracingIncludes: { "/**": ["./src/modules/documents/fonts/**", "./src/modules/documents/assets/**"] },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

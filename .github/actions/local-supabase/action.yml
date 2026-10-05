@@ -16,4 +16,6 @@ runs:
           echo "DATABASE_URL=$(jq -r '.DB_URL' <<<"$status")"
           echo "SUPABASE_SECRET_KEY=$(jq -r '.SECRET_KEY // .SERVICE_ROLE_KEY' <<<"$status")"
           echo "FIELD_ENCRYPTION_KEY=$(openssl rand -base64 32)"
+          echo "MAILPIT_URL=$(jq -r '.MAILPIT_URL // .INBUCKET_URL' <<<"$status")"
+          echo "APP_URL=http://localhost:3000"
         } >> "$GITHUB_ENV"

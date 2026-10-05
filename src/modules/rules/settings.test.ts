@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { resolvePayrollSettings } from "./resolve";
+import { resolveCompanyDetails, resolvePayrollSettings } from "./resolve";
 import type { RuleRow } from "./types";
-import { V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "./v1";
+import { V1_COMPANY_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "./v1";
 
 // Payroll settings are company-wide, but rules attach to an employment type, so they are stored for
 // both types and always written together.
@@ -51,5 +51,25 @@ describe("payroll settings", () => {
 
   it("are an error, never a default, when missing", () => {
     expect(() => resolvePayrollSettings(V1_RULE_ROWS, october)).toThrow(/No payroll_settings rule/);
+  });
+});
+
+describe("company details", () => {
+  const withCompany = [...rows, ...V1_COMPANY_RULE_ROWS];
+
+  it("start as Xceed Studio with no address and no logo", () => {
+    expect(resolveCompanyDetails(withCompany, october)).toMatchObject({ name: "Xceed Studio", addressLines: [], showLogo: false });
+  });
+
+  it("take an address added later from its month, leaving earlier months as they were", () => {
+    const value = { name: "Xceed Studio", address_lines: ["Norzin Lam", "Thimphu"], show_logo: true };
+    const later = [...withCompany, ...(["full_time", "intern"] as const).map((employmentType) => ({ ...setting(employmentType, "2026-11-01", value), key: "company_details" as const }))];
+    expect(resolveCompanyDetails(later, { year: 2026, month: 11 })).toMatchObject({ addressLines: ["Norzin Lam", "Thimphu"], showLogo: true });
+    expect(resolveCompanyDetails(later, october).addressLines).toEqual([]);
+  });
+
+  it("refuse a blank name", () => {
+    const blank = [...rows, ...(["full_time", "intern"] as const).map((employmentType) => ({ ...setting(employmentType, "2026-01-01", { name: " ", address_lines: [], show_logo: false }), key: "company_details" as const }))];
+    expect(() => resolveCompanyDetails(blank, october)).toThrow();
   });
 });

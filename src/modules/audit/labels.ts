@@ -33,7 +33,8 @@ export type AuditAction =
   | "payroll.line_added"
   | "payroll.line_removed"
   | "payroll.acknowledged"
-  | "payroll.locked";
+  | "payroll.locked"
+  | "payslip.generated";
 
 export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
   await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);

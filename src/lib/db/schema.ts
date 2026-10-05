@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   integer,
   index,
@@ -592,3 +593,92 @@ export const payrollSnapshots = pgTable(
 ).enableRLS();
 
 export type PayrollSnapshot = typeof payrollSnapshots.$inferSelect;
+
+// ── Payslips (milestone 5) ──────────────────────────────────────────────────────
+// One per locked snapshot, built from it once and never changed. The PDF lives here, in Postgres, so
+// the nightly backup carries it. People read their own (RLS); files are served through short-lived
+// signed links after that check. Guards, audit and the email functions are in a custom migration.
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+export const payslips = pgTable(
+  "payslips",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id),
+    snapshotId: uuid("snapshot_id")
+      .notNull()
+      .references(() => payrollSnapshots.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    month: date("month").notNull(),
+    // XS-202610-007: the month, then the person's place in that month's payslips.
+    reference: text("reference").notNull(),
+    employmentType: employmentType("employment_type").notNull(),
+    takeHomeCh: bigint("take_home_ch", { mode: "number" }).notNull(),
+    // Exactly what the payslip says (modules/documents/model.ts), for the PDF and the in-app view.
+    content: jsonb("content").notNull(),
+    pdf: bytea("pdf").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    generatedBy: uuid("generated_by").references(() => authUsers.id),
+  },
+  (table) => [
+    unique("payslips_snapshot").on(table.snapshotId),
+    unique("payslips_reference").on(table.reference),
+    index("payslips_person_month").on(table.personId, table.month),
+    pgPolicy("payslips_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("payslips_insert_admin", { for: "insert", to: authenticatedRole, withCheck: sql`(select public.is_admin())` }),
+  ],
+).enableRLS();
+
+export type Payslip = typeof payslips.$inferSelect;
+
+export const emailKind = pgEnum("email_kind", ["payslip", "payslip_resend", "payslip_self", "leave_requested", "leave_decided"]);
+export const emailStatus = pgEnum("email_status", ["queued", "sending", "sent", "failed", "skipped"]);
+
+// Every email DashTeam sends, as a durable outbox: queued, claimed, then sent, failed or skipped.
+// Written only through security-definer functions (custom migration), which check who's asking.
+// The dedupe key makes the automatic emails happen once however many times issuing runs.
+export const emailDeliveries = pgTable(
+  "email_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    kind: emailKind("kind").notNull(),
+    payslipId: uuid("payslip_id").references(() => payslips.id),
+    leaveRequestId: uuid("leave_request_id").references(() => leaveRequests.id, { onDelete: "set null" }),
+    toEmail: text("to_email").notNull(),
+    dedupeKey: text("dedupe_key"),
+    // What the email was about when it was queued, so a leave email is skipped if that changed.
+    context: jsonb("context").notNull().default(sql`'{}'::jsonb`),
+    status: emailStatus("status").notNull().default("queued"),
+    attempts: integer("attempts").notNull().default(0),
+    // Plain words, shown to the admin. Never a raw provider error.
+    lastError: text("last_error"),
+    providerId: text("provider_id"),
+    sendAfter: timestamp("send_after", { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    requestedBy: uuid("requested_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("email_deliveries_dedupe").on(table.dedupeKey),
+    index("email_deliveries_payslip").on(table.payslipId),
+    index("email_deliveries_status").on(table.status, table.sendAfter),
+    pgPolicy("email_deliveries_select_admin_or_requester", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`(select public.is_admin()) or ${table.requestedBy} = ${authUid}`,
+    }),
+  ],
+).enableRLS();
+
+export type EmailDelivery = typeof emailDeliveries.$inferSelect;

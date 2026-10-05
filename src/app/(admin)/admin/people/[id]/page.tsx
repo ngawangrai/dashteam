@@ -5,6 +5,7 @@ import { LinkRow } from "@/components/link-row";
 import { MaskedValue } from "@/components/masked-value";
 import { Money } from "@/components/money";
 import { Page } from "@/components/page";
+import { PayslipList } from "@/components/documents/payslip-list";
 import { PayRows } from "@/components/people/pay-rows";
 import { RequestCard } from "@/components/people/request-card";
 import { BalanceSummary } from "@/components/leave/balance-summary";
@@ -17,6 +18,7 @@ import { lockedRange } from "@/modules/run/repository";
 import { enterLeaveFor } from "@/modules/leave/actions";
 import { balancesFor, exitLeaveFor, loadLeaveContext, sheetContextFor } from "@/modules/leave/repository";
 import { formatDate, formatMonth, formatPhone, monthOf, thimphuToday } from "@/lib/format";
+import { payslipsFor } from "@/modules/documents/repository";
 import { takeHomeFor } from "@/modules/people/estimate";
 import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
 import { getPersonDetail, rulesForMonth } from "@/modules/people/repository";
@@ -33,7 +35,7 @@ export default async function PersonPage({ params }: Params) {
   if (!detail) notFound();
 
   const { person, current, upcoming, pendingRequest } = detail;
-  const [rules, leave, exit] = await Promise.all([rulesForMonth(user), loadLeaveContext(user, person.id), exitLeaveFor(user, person.id)]);
+  const [rules, leave, exit, payslips] = await Promise.all([rulesForMonth(user), loadLeaveContext(user, person.id), exitLeaveFor(user, person.id), payslipsFor(user, person.id)]);
   const today = thimphuToday();
   const sheet = leave ? sheetContextFor(leave, await lockedRange(user)) : null;
   const firstName = firstNameFrom(person.fullName, person.email);
@@ -111,6 +113,8 @@ export default async function PersonPage({ params }: Params) {
           ) : null}
         </>
       ) : null}
+
+      {payslips.length ? <PayslipList payslips={payslips} mode="admin" personName={person.fullName} title="Payslips" /> : null}
 
       <InsetSection title="Bank and tax">
         <InsetRow label="Bank">{person.bankName ?? "Not added"}</InsetRow>

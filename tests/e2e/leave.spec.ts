@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { db, expectNoSideways, signIn, signOut } from "./helpers";
+import { emailsAbout } from "./mailpit";
 
 // Milestone 3 end to end: requesting leave with the balance shown live, approving and undoing,
 // declining with a note, cancelling, holidays, Who's out and leave at exit.
@@ -205,4 +206,50 @@ test("leave taken beyond the entitlement at exit becomes a suggestion the admin 
   const lines = await db`select month::text, kind::text, amount_ch::int as amount, source::text from public.payroll_lines where person_id = ${person?.id ?? ""}`;
   expect(lines).toEqual([{ month: "2026-10-01", kind: "leave_recovery", amount: 232_300, source: "exit_settlement" }]);
   await db`delete from public.people where id = ${person?.id}`;
+});
+
+test("leave emails: admins hear about a request, the person hears the decision, and Undo stops it", async ({ page }, testInfo) => {
+  // Emails don't depend on the device, and each waits out the Undo window, so this runs once.
+  test.skip(testInfo.project.name !== "desktop", "Runs on the laptop project only.");
+  test.setTimeout(120_000);
+  const week = weekAhead(14);
+  const tuesday = new Date(week.monday.getTime() + 86_400_000);
+  const thursday = new Date(week.monday.getTime() + 3 * 86_400_000);
+  const short = (date: Date) => `${DAYS[date.getUTCDay()]?.slice(0, 3)} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]?.slice(0, 3)}`;
+
+  async function requestDay(day: Date) {
+    await signIn(page, EMPLOYEE);
+    await page.goto("/leave");
+    await page.getByRole("button", { name: "Request leave" }).first().click();
+    const sheet = page.getByRole("dialog", { name: "Request leave" });
+    await pickDates(sheet, week.monthsAhead, week.label(day), week.label(day));
+    await sheet.getByRole("button", { name: /^Request \d/ }).click();
+    await expect(page.getByText(/^Sent to your admin/)).toBeVisible();
+    await signOut(page);
+  }
+
+  // A request: the admin is told, after the moment Undo has.
+  const since = new Date(Date.now() - 2_000);
+  await requestDay(tuesday);
+  // (Earlier tests' leave emails may still be arriving, so look for the one about this day.)
+  expect(await emailsAbout(ADMIN, since, /^Sonam asked for 1 day of annual leave$/, short(tuesday), 30_000)).toHaveLength(1);
+
+  // Approved: Sonam is told.
+  await signIn(page, ADMIN);
+  const card = page.getByRole("article").filter({ hasText: "Sonam Wangmo" }).filter({ hasText: short(tuesday) });
+  await card.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("Sonam’s leave is approved.")).toBeVisible();
+  expect(await emailsAbout(EMPLOYEE, since, "Your annual leave is approved", short(tuesday), 30_000)).toHaveLength(1);
+  await signOut(page);
+
+  // Approved, then undone straight away: no email goes.
+  await requestDay(thursday);
+  await signIn(page, ADMIN);
+  const undoSince = new Date(Date.now() - 1_000);
+  const second = page.getByRole("article").filter({ hasText: "Sonam Wangmo" }).filter({ hasText: short(thursday) });
+  await second.getByRole("button", { name: "Approve" }).click();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("Undone.")).toBeVisible();
+  await page.waitForTimeout(20_000);
+  expect(await emailsAbout(EMPLOYEE, undoSince, "Your annual leave is approved", short(thursday))).toHaveLength(0);
 });

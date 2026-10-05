@@ -2,15 +2,18 @@ import { CalendarDays } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { InsetSection } from "@/components/inset-section";
+import { LinkRow } from "@/components/link-row";
+import { Money } from "@/components/money";
 import { BalanceSummary } from "@/components/leave/balance-summary";
 import { RequestLeaveSheet } from "@/components/leave/request-sheet";
 import { Page } from "@/components/page";
 import { requireUser } from "@/lib/auth/session";
-import { lockedRange } from "@/modules/run/repository";
-import { formatDays, formatSpan, thimphuToday } from "@/lib/format";
+import { formatDays, formatMonth, formatSpan, thimphuToday } from "@/lib/format";
+import { ownPayslips } from "@/modules/documents/repository";
 import { requestLeave } from "@/modules/leave/actions";
 import { LEAVE_TYPE_NAME } from "@/modules/leave/labels";
 import { balancesFor, loadLeaveContext, sheetContextFor } from "@/modules/leave/repository";
+import { lockedRange } from "@/modules/run/repository";
 
 export const metadata = { title: "Home" };
 
@@ -31,6 +34,7 @@ export default async function EmployeeHomePage() {
   }
 
   const balances = balancesFor(context, Number(today.slice(0, 4)));
+  const [latest] = await ownPayslips(user);
   const next = context.requests.find((request) => request.endDate >= today && (request.status === "approved" || request.status === "pending"));
 
   return (
@@ -48,6 +52,13 @@ export default async function EmployeeHomePage() {
           </Link>
         ) : (
           <p className="px-4 py-3 text-body text-label-secondary">No leave booked. When you need time off, request it here.</p>
+        )}
+      </InsetSection>
+      <InsetSection title="Latest payslip">
+        {latest ? (
+          <LinkRow href={`/payslips?open=${latest.id}`} title={formatMonth(latest.month, { withYear: true })} detail="Take-home" trailing={<Money amount={latest.takeHome} className="font-semibold text-label" />} />
+        ) : (
+          <p className="px-4 py-3 text-body text-label-secondary">Your payslip arrives here once your first month’s payroll is locked.</p>
         )}
       </InsetSection>
       <div className="md:max-w-xs">

@@ -152,6 +152,15 @@ const payrollSettings = z
     dueDay: value.due_day,
   }));
 
+const companyDetails = z
+  .object({
+    name: z.string().trim().min(1, "The company needs a name"),
+    address_lines: z.array(z.string().trim().min(1)).max(4),
+    show_logo: z.boolean(),
+  })
+  .strict()
+  .transform((value) => ({ name: value.name, addressLines: value.address_lines, showLogo: value.show_logo }));
+
 const schemas = {
   tds,
   health_contribution: healthContribution,
@@ -166,6 +175,7 @@ const schemas = {
   leave_backdate: leaveBackdate,
   leave_exit_payout: leaveExitPayout,
   payroll_settings: payrollSettings,
+  company_details: companyDetails,
 } satisfies { [K in RuleKey]: z.ZodType<RuleValues[K]> };
 
 export function parseRuleValue<K extends RuleKey>(key: K, value: unknown): RuleValues[K] {

@@ -32,9 +32,10 @@ export const LEAVE_RULE_KEYS = [
   "leave_exit_payout",
 ] as const satisfies readonly LeaveRuleKey[];
 
-// Company-wide payroll settings (milestone 4). Stored for both employment types and written together.
-export type SettingsRuleKey = "payroll_settings";
-export const SETTINGS_RULE_KEYS = ["payroll_settings"] as const satisfies readonly SettingsRuleKey[];
+// Company-wide settings: payroll (milestone 4) and the company's details on documents (milestone 5).
+// Stored for both employment types and written together.
+export type SettingsRuleKey = "payroll_settings" | "company_details";
+export const SETTINGS_RULE_KEYS = ["payroll_settings", "company_details"] as const satisfies readonly SettingsRuleKey[];
 
 export type RuleKey = PayrollRuleKey | LeaveRuleKey | SettingsRuleKey;
 // Order matters: it is the order of the database enum, which only ever grows at the end.
@@ -159,11 +160,19 @@ export type SettingsRuleValues = {
     /** TDS and HC for a month are due on this day of the next month. */
     dueDay: number;
   };
+  company_details: {
+    name: string;
+    /** Printed under the name on payslips. Empty until the address is added. */
+    addressLines: string[];
+    /** Whether documents show the logo file in src/modules/documents/assets. */
+    showLogo: boolean;
+  };
 };
 
 export type RuleValues = PayrollRuleValues & LeaveRuleValues & SettingsRuleValues;
 
 export type PayrollSettings = SettingsRuleValues["payroll_settings"] & { ruleIds: string[] };
+export type CompanyDetails = SettingsRuleValues["company_details"] & { ruleIds: string[] };
 
 /** Every leave rule in force for one employment type in one month. */
 export type ResolvedLeaveRules = {
