@@ -1,0 +1,31 @@
+# Reminds admins about TDS filing on the reminder days (a setting: the 5th, 8th and 10th to start),
+# until the month is marked filed. Runs daily; the app decides whether today is a reminder day and
+# sends at most one reminder a day, so running it twice is harmless.
+name: Filing reminders
+
+on:
+  schedule:
+    # 02:30 UTC is 08:30 in Thimphu.
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask DashTeam to send today's reminder
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Set the APP_URL and CRON_SECRET repository secrets first."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -X POST "$APP_URL/api/cron/filing-reminders" \
+            -H "Authorization: Bearer $CRON_SECRET"

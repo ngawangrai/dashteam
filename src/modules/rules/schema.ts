@@ -161,6 +161,12 @@ const companyDetails = z
   .strict()
   .transform((value) => ({ name: value.name, addressLines: value.address_lines, showLogo: value.show_logo }));
 
+const filingSettings = z
+  .object({ reminder_days: z.array(z.number().int().min(1).max(28)).min(1) })
+  .strict()
+  .refine((value) => new Set(value.reminder_days).size === value.reminder_days.length, "A reminder day is listed twice")
+  .transform((value) => ({ reminderDays: [...value.reminder_days].sort((a, b) => a - b) }));
+
 const schemas = {
   tds,
   health_contribution: healthContribution,
@@ -176,6 +182,7 @@ const schemas = {
   leave_exit_payout: leaveExitPayout,
   payroll_settings: payrollSettings,
   company_details: companyDetails,
+  filing_settings: filingSettings,
 } satisfies { [K in RuleKey]: z.ZodType<RuleValues[K]> };
 
 export function parseRuleValue<K extends RuleKey>(key: K, value: unknown): RuleValues[K] {

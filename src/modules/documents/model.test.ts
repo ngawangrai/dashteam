@@ -1,79 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { V1_HOLIDAYS } from "@/modules/leave/holidays-v1";
-import type { PayTerms } from "@/modules/people/pay";
 import { resolveCompanyDetails } from "@/modules/rules/resolve";
-import type { RuleRow } from "@/modules/rules/types";
-import { V1_COMPANY_RULE_ROWS, V1_LEAVE_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "@/modules/rules/v1";
-import { type PersonRun, type RunPerson, buildRun } from "@/modules/run/build";
-import type { RunLine } from "@/modules/run/lines";
-import { type PayslipSnapshot, payslipModel, payslipReference } from "./model";
+import type { RunPerson } from "@/modules/run/build";
+import { MIXED_LINES, OCTOBER, RULES, line, mixedTeam, nu, person, personIn, salary, snapshotOf } from "../../../tests/support/mixed-team";
+import { payslipModel, payslipReference } from "./model";
 
 // A payslip prints what was locked, nothing else. These build the milestone 4 mixed team through the
 // real run calculation, turn each person into a snapshot exactly as lockPayroll stores it, and check
 // every printed figure against that snapshot.
 
-const nu = (amount: number) => Math.round(amount * 100);
-const OCTOBER = { year: 2026, month: 10 };
-const RULES: RuleRow[] = [...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS, ...V1_SETTINGS_RULE_ROWS, ...V1_COMPANY_RULE_ROWS];
 const COMPANY = resolveCompanyDetails(RULES, OCTOBER);
-
-const salary = (basic: number, allowances: number, effectiveFrom = "2025-01-01") =>
-  ({ effectiveFrom, employmentType: "full_time", basic: nu(basic), allowances: nu(allowances) }) as PayTerms;
-const stipend = (amount: number) => ({ effectiveFrom: "2025-01-01", employmentType: "intern", stipend: nu(amount) }) as PayTerms;
-
-const person = (id: string, name: string, fields: Partial<RunPerson> = {}): RunPerson => ({
-  id,
-  fullName: name,
-  startDate: "2025-01-06",
-  endDate: null,
-  pay: [salary(40_000, 5_000)],
-  hasTpn: true,
-  hasBankAccount: true,
-  leave: [],
-  pendingChange: null,
-  ...fields,
-});
-
-const line = (personId: string, kind: RunLine["kind"], amount: number, note = ""): RunLine => ({ id: `${personId}-${kind}`, personId, kind, amount: nu(amount), note, source: "manual" });
-
-const run = buildRun({
-  month: OCTOBER,
-  people: [
-    person("karma", "Karma Wangchuk", { pay: [salary(50_000, 10_000)] }),
-    person("dechen", "Dechen Lhamo", { pay: [stipend(20_000)] }),
-    person("pema", "Pema Choden", { startDate: "2026-10-15", pay: [salary(40_000, 5_000, "2026-10-01")] }),
-    person("tshering", "Tshering Dorji", { endDate: "2026-10-20", pay: [salary(60_000, 10_000)] }),
-    person("sonam", "Sonam Wangmo", {
-      leave: [{ id: "u", leaveType: "unpaid", status: "approved", startDate: "2026-10-07", endDate: "2026-10-08", startHalf: false, endHalf: false, childOrder: null }],
-    }),
-  ],
-  lines: [line("karma", "arrear", 5_000, "September increment"), line("karma", "advance_recovery", 3_000, "Advance, 1 of 3"), line("sonam", "leave_recovery", 1_000, "Leave taken beyond entitlement")],
-  ruleRows: RULES,
-  holidays: V1_HOLIDAYS.map((h) => ({ ...h })),
-  firstMonth: OCTOBER,
-  lockedMonths: [],
-  previousTakeHome: {},
-  acknowledged: [],
-});
-
-/** What lockPayroll writes to payroll_snapshots for one person, as the payslip reads it back. */
-function snapshotOf(p: PersonRun, tpnLast4: string | null = "1234"): PayslipSnapshot {
-  if (!p.result || !p.employmentType || !p.input) throw new Error(`${p.personId} wasn't worked out`);
-  return {
-    month: OCTOBER,
-    fullName: p.fullName,
-    employmentType: p.employmentType,
-    person: { tpnLast4 },
-    inputs: { terms: p.terms, startDate: p.startDate, endDate: p.endDate, unpaidLeaveDays: p.unpaidLeaveDays, lines: p.lines, payInput: p.input },
-    result: p.result,
-  };
-}
-
-const snapshot = (id: string) => {
-  const p = run.people.find((candidate) => candidate.personId === id);
-  if (!p) throw new Error(id);
-  return snapshotOf(p);
-};
+const run = mixedTeam([...MIXED_LINES, line("sonam", "leave_recovery", 1_000, "Leave taken beyond entitlement")]);
+const snapshot = (id: string) => snapshotOf(personIn(run, id));
 
 const model = (id: string) => payslipModel(snapshot(id), COMPANY, "XS-202610-001", "2026-10-31", "Tashi");
 const rows = (lines: { label: string; amount: number }[]) => lines.map((l) => `${l.label} ${l.amount / 100}`);
@@ -133,8 +70,8 @@ describe("rows that don't apply are left out", () => {
   });
 
   it("leaves out an allowance of zero", () => {
-    const p = buildRun({ ...runInputFor(person("solo", "Solo Person", { pay: [salary(30_000, 0)] })) }).people[0];
-    if (!p) throw new Error("no run");
+    const solo: RunPerson[] = [person("solo", "Solo Person", { pay: [salary(30_000, 0)] })];
+    const p = personIn(mixedTeam([], solo), "solo");
     expect(rows(payslipModel(snapshotOf(p), COMPANY, "XS-202610-001", "2026-10-31").earnings)).toEqual(["Basic 30000"]);
   });
 });
@@ -153,9 +90,7 @@ describe("who and what it's for", () => {
   });
 
   it("says when there's no TPN on file", () => {
-    const p = run.people.find((candidate) => candidate.personId === "karma");
-    if (!p) throw new Error("no karma");
-    expect(payslipModel(snapshotOf(p, null), COMPANY, "XS-202610-001", "2026-10-31").person.tpn).toBe("TPN not on file");
+    expect(payslipModel(snapshotOf(personIn(run, "karma"), null), COMPANY, "XS-202610-001", "2026-10-31").person.tpn).toBe("TPN not on file");
   });
 
   it("numbers payslips by month and position", () => {
@@ -164,6 +99,3 @@ describe("who and what it's for", () => {
   });
 });
 
-function runInputFor(p: RunPerson) {
-  return { month: OCTOBER, people: [p], lines: [], ruleRows: RULES, holidays: [], firstMonth: OCTOBER, lockedMonths: [], previousTakeHome: {}, acknowledged: [] };
-}

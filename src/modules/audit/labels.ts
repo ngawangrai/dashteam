@@ -34,7 +34,12 @@ export type AuditAction =
   | "payroll.line_removed"
   | "payroll.acknowledged"
   | "payroll.locked"
-  | "payslip.generated";
+  | "payslip.generated"
+  | "filing.schedule_made"
+  | "filing.marked_filed"
+  | "filing.edited"
+  | "filing.receipt_added"
+  | "filing.entry_ticked";
 
 export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
   await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);

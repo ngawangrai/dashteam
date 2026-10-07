@@ -1,33 +1,12 @@
 import type postgres from "postgres";
 import { describe, expect, it } from "vitest";
 import { ADMIN_ID, EMPLOYEE_ID, SEEDED_EMPLOYEE_PERSON_ID as SONAM, actAs, as, rolledBack, uniqueEmail } from "./local-db";
+import { lockJanuary } from "./locking";
 
 // Payslips and the email outbox in the database. Locks are permanent, so everything runs in
 // transactions that roll back, on months in 2030 nothing else touches.
 
 const JANUARY = "2030-01-01";
-
-async function lockJanuary(tx: postgres.TransactionSql): Promise<string> {
-  await tx`delete from public.rules where key = 'payroll_settings' and effective_from = date_trunc('month', public.thimphu_today())::date`;
-  for (const type of ["full_time", "intern"]) {
-    await tx`insert into public.rules (key, employment_type, effective_from, value, note)
-             values ('payroll_settings', ${type}, date_trunc('month', public.thimphu_today())::date,
-                     ${tx.json({ first_month: JANUARY, large_change_bp: 1000, due_day: 10 })}, 'test')`;
-  }
-  const [run] = await tx<{ id: string }[]>`insert into public.payroll_runs (month) values (${JANUARY}) returning id`;
-  const runId = run?.id ?? "";
-  await tx`
-    insert into public.payroll_snapshots (run_id, person_id, full_name, email, employment_type, person, inputs, result, rule_ids,
-      gross_ch, health_contribution_ch, provident_fund_ch, gis_ch, tds_ch, recoveries_ch, take_home_ch)
-    select ${runId}, p.id, p.full_name, p.email, 'full_time', '{}', '{}', '{}', '{}', 100, 1, 0, 0, 0, 0, 99
-    from public.people p
-    where p.start_date <= '2030-01-31' and (p.end_date is null or p.end_date >= ${JANUARY})`;
-  await tx`update public.payroll_runs
-           set status = 'locked', people_count = 0, gross_ch = 0, health_contribution_ch = 0, provident_fund_ch = 0, gis_ch = 0,
-               tds_ch = 0, recoveries_ch = 0, take_home_ch = 0, remit_ch = 0, due_date = '2030-02-10', rule_ids = '{}'
-           where id = ${runId}`;
-  return runId;
-}
 
 async function issue(tx: postgres.TransactionSql, runId: string, personId: string, reference: string): Promise<string> {
   const [row] = await tx<{ id: string }[]>`

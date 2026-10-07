@@ -1,6 +1,8 @@
 import { expect, type Page, test } from "@playwright/test";
 import { db, expectNoSideways, signIn, signOut } from "./helpers";
-import { emailDetail, waitForEmails } from "./mailpit";
+import * as XLSX from "xlsx";
+import { emailDetail, emailsTo, waitForEmails } from "./mailpit";
+import { FILING_TODAY, NEXT_REMINDER_DAY, NOT_A_REMINDER_DAY, TEST_CRON_SECRET } from "./test-clock";
 
 // Milestone 4 end to end: set the first month, review everyone, adjust one-offs inline with Undo,
 // clear and acknowledge the checks, hold to lock, read the locked month and its bank list, and see
@@ -36,6 +38,11 @@ const money = (chhertum: number) => {
 async function clearPayroll() {
   await db.begin(async (tx) => {
     await tx`set local session_replication_role = replica`;
+    await tx`delete from public.filing_reminders`;
+    await tx`update public.filings set receipt_id = null`;
+    await tx`delete from public.filings`;
+    await tx`delete from public.filing_receipts`;
+    await tx`delete from public.it1a_schedules`;
     await tx`delete from public.email_deliveries where payslip_id is not null`;
     await tx`delete from public.payslips`;
     await tx`delete from public.payroll_snapshots`;
@@ -352,4 +359,131 @@ test("a change inside the locked month is refused, saying what to do instead", a
     db`insert into public.leave_requests (person_id, leave_type, start_date, end_date, status, requested_by)
        values (${SONAM}, 'annual', ${first.toISOString().slice(0, 10)}, ${second.toISOString().slice(0, 10)}, 'pending', '22222222-2222-4222-8222-222222222222')`,
   ).rejects.toThrow(new RegExp(`${NAME} ${YEAR} payroll is locked`));
+});
+
+// ── Milestone 6: the IT-1(a), filing, and reminders ────────────────────────────────
+
+const cron = (page: Page, options: { secret?: string; today?: string } = {}) =>
+  page.request.post(`/api/cron/filing-reminders${options.today ? `?today=${options.today}` : ""}`, {
+    headers: options.secret === undefined ? { authorization: `Bearer ${TEST_CRON_SECRET}` } : options.secret ? { authorization: `Bearer ${options.secret}` } : {},
+  });
+
+test("the IT-1(a) is ready after lock, and its file matches the snapshot", async ({ page }, testInfo) => {
+  await expect
+    .poll(async () => (await db`select count(*)::int as n from public.it1a_schedules s join public.payroll_runs r on r.id = s.run_id where r.month = ${FIRST_DAY}`)[0]?.n, { timeout: 20_000 })
+    .toBe(1);
+  await signIn(page, ADMIN);
+  // The home says how long is left (the test plays the 5th of next month: due on the 10th).
+  const card = page.getByRole("link", { name: new RegExp(`^${NAME} TDS`) });
+  await expect(card).toContainText("due in 5 days");
+  await expectNoSideways(page);
+  await testInfo.attach("home-due", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  await card.click();
+  await expect(page).toHaveURL(new RegExp(`/admin/payroll/${KEY}/filing$`));
+  await expect(page.getByText("Ready to file. Due in 5 days.")).toBeVisible();
+  const [run] = await db<{ remit_ch: string }[]>`select remit_ch::text from public.payroll_runs where month = ${FIRST_DAY}`;
+  await expect(page.getByText(money(Number(run?.remit_ch ?? 0))).first()).toBeVisible();
+  await expectNoSideways(page);
+  await testInfo.attach("filing", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+
+  // The upload file: DRC's template, one row per person from row 4, every figure the snapshot's.
+  await expect(page.getByRole("link", { name: "Download IT-1(a) file" })).toHaveAttribute("href", `/admin/payroll/${KEY}/filing/it1a`);
+  const response = await page.request.get(`/admin/payroll/${KEY}/filing/it1a`);
+  expect(response.headers()["content-type"]).toBe("application/vnd.ms-excel");
+  const sheet = XLSX.read(await response.body(), { type: "buffer" }).Sheets.Sheet1 ?? {};
+  expect([sheet.A1?.v, sheet.A2?.v, sheet.C3?.v, sheet.L3?.v]).toEqual(["FORM IT-1(a) MONTHLY SALARY SCHEDULE", "TName of Employee", "Basic Salary", "Total\n(8+9)"]);
+  const snapshots = await db<{ full_name: string; gross_ch: string; tds_ch: string; health_contribution_ch: string }[]>`
+    select s.full_name, s.gross_ch::text, s.tds_ch::text, s.health_contribution_ch::text
+    from public.payroll_snapshots s join public.payroll_runs r on r.id = s.run_id where r.month = ${FIRST_DAY} order by s.full_name`;
+  const rows = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, { header: 1, range: 3 });
+  expect(rows.map((row) => row[0])).toEqual(snapshots.map((s) => s.full_name));
+  for (const [i, snapshot] of snapshots.entries()) {
+    const row = rows[i] ?? [];
+    expect([row[5], row[9], row[10]]).toEqual([Number(snapshot.gross_ch) / 100, Number(snapshot.tds_ch) / 100, Number(snapshot.health_contribution_ch) / 100]);
+    expect(Number(row[2]) + Number(row[3]) + Number(row[4])).toBe(Number(snapshot.gross_ch) / 100);
+  }
+  const [audited] = await db`select count(*)::int as n from public.audit_log where action = 'filing.schedule_downloaded'`;
+  expect(audited?.n).toBeGreaterThan(0);
+});
+
+test("the copy-ready screen copies plain numbers and keeps each tick", async ({ page, context }, testInfo) => {
+  await signIn(page, ADMIN);
+  await page.goto(`/admin/payroll/${KEY}/filing/entry`);
+  await page.waitForLoadState("networkidle");
+  const people = (await db`select count(*)::int as n from public.payroll_snapshots s join public.payroll_runs r on r.id = s.run_id where r.month = ${FIRST_DAY}`)[0]?.n;
+  await expect(page.getByText(`0 of ${people} entered`)).toBeVisible();
+
+  const copy = page.getByRole("button", { name: /^Copy Sonam Wangmo’s Gross Salary/ }).filter({ visible: true });
+  if (testInfo.project.name === "desktop") {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await copy.click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^\d+(\.\d{2})?$/);
+  } else {
+    await copy.click();
+  }
+  await expect(copy).toContainText("Copied");
+
+  await page.getByRole("checkbox", { name: "Sonam Wangmo entered" }).filter({ visible: true }).check();
+  await expect(page.getByText(`1 of ${people} entered`)).toBeVisible();
+  // The tick shows at once; wait for it to be saved before reloading.
+  await expect
+    .poll(async () => (await db`select f.entered from public.filings f join public.payroll_runs r on r.id = f.run_id where r.month = ${FIRST_DAY}`)[0]?.entered)
+    .toContain("33333333-3333-4333-8333-333333333333");
+  await page.reload();
+  await expect(page.getByRole("checkbox", { name: "Sonam Wangmo entered" }).filter({ visible: true })).toBeChecked();
+  await expectNoSideways(page);
+  await testInfo.attach("entry", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+});
+
+test("the reminder job needs its secret, sends once a day, and only on reminder days", async ({ page }) => {
+  expect((await cron(page, { secret: "" })).status()).toBe(401);
+  expect((await cron(page, { secret: "wrong-secret-wrong-secret-wrong-secret" })).status()).toBe(401);
+  expect((await page.request.get("/api/cron/filing-reminders", { headers: { authorization: `Bearer ${TEST_CRON_SECRET}` } })).status()).toBe(405);
+
+  const since = new Date(Date.now() - 2_000);
+  const first = await cron(page);
+  expect(await first.json()).toMatchObject({ sent: true, months: [KEY] });
+  expect(await waitForEmails(ADMIN, since, `${NAME} TDS is due in 5 days`)).toHaveLength(1);
+  expect(await (await cron(page)).json()).toEqual({ sent: false, reason: "already_sent_today" });
+  expect(await (await cron(page, { today: NOT_A_REMINDER_DAY })).json()).toEqual({ sent: false, reason: "not_a_reminder_day" });
+  expect((await emailsTo(ADMIN, since)).filter((m) => m.Subject.includes("TDS"))).toHaveLength(1);
+});
+
+test("marking the month filed, editing it with a receipt, and the history", async ({ page }, testInfo) => {
+  await signIn(page, ADMIN);
+  await page.goto(`/admin/payroll/${KEY}/filing`);
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Mark as filed" }).click();
+  const sheet = page.getByRole("dialog", { name: `Mark ${NAME} as filed` });
+  await sheet.getByLabel("Payment reference").fill("PAY-123");
+  await sheet.getByLabel("Acknowledgement number").fill("ACK-456");
+  await testInfo.attach("mark-filed", { body: await page.screenshot(), contentType: "image/png" });
+  await sheet.getByRole("button", { name: `Mark ${NAME} as filed` }).click();
+  await expect(page.getByText(`${NAME} is marked as filed. Reminders stop.`)).toBeVisible();
+  const filedOn = new Date(`${FILING_TODAY}T00:00:00Z`);
+  const shortDate = `${filedOn.getUTCDate()} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][filedOn.getUTCMonth()]} ${filedOn.getUTCFullYear()}`;
+  await expect(page.getByText(`Filed ${shortDate}`)).toBeVisible();
+
+  // Edit: replace the reference and keep a receipt.
+  await page.getByRole("button", { name: "Edit" }).click();
+  const edit = page.getByRole("dialog", { name: `${NAME} filing` });
+  await edit.getByLabel("Payment reference").fill("PAY-124");
+  await edit.getByLabel("Receipt (optional)").setInputFiles({ name: "receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 receipt") });
+  await edit.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Changes saved.")).toBeVisible();
+  await expect(page.getByText("PAY-124")).toBeVisible();
+  const receipt = await page.request.get(`/admin/payroll/${KEY}/filing/receipt`);
+  expect(receipt.headers()["content-type"]).toBe("application/pdf");
+  const actions = (await db`select action from public.audit_log where entity_table in ('filings', 'filing_receipts') order by id desc limit 6`).map((row) => row.action);
+  expect(actions).toEqual(expect.arrayContaining(["filing.marked_filed", "filing.edited", "filing.receipt_added"]));
+
+  // The history keeps it; the home stops asking; reminders stop.
+  await page.goto("/admin/filing");
+  await expect(page.getByRole("link", { name: new RegExp(`${NAME} ${YEAR}`) })).toContainText(`Filed ${shortDate.replace(/ \d{4}$/, "")}`);
+  await expect(page.getByRole("link", { name: new RegExp(`${NAME} ${YEAR}`) })).toContainText("ACK-456");
+  await expectNoSideways(page);
+  await testInfo.attach("history", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  await page.goto("/admin");
+  await expect(page.getByRole("link", { name: new RegExp(`^${NAME} TDS`) })).toHaveCount(0);
+  expect(await (await cron(page, { today: NEXT_REMINDER_DAY })).json()).toEqual({ sent: false, reason: "nothing_to_file" });
 });

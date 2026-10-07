@@ -8,6 +8,7 @@ import {
   type PayrollRuleValues,
   type PayrollSettings,
   type CompanyDetails,
+  type FilingSettings,
   type SettingsRuleKey,
   type SettingsRuleValues,
   type ResolvedLeaveRules,
@@ -111,4 +112,9 @@ export function resolvePayrollSettings(rows: readonly RuleRow[], month: PayrollM
 /** The company's name, address and logo as documents for this month show them. */
 export function resolveCompanyDetails(rows: readonly RuleRow[], month: PayrollMonth): CompanyDetails {
   return companyWide(rows, "company_details", month);
+}
+
+/** When TDS filing reminders go out, as in force for a month. */
+export function resolveFilingSettings(rows: readonly RuleRow[], month: PayrollMonth): FilingSettings {
+  return companyWide(rows, "filing_settings", month);
 }

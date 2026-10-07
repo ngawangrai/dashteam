@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { resolveCompanyDetails, resolvePayrollSettings } from "./resolve";
+import { resolveCompanyDetails, resolveFilingSettings, resolvePayrollSettings } from "./resolve";
 import type { RuleRow } from "./types";
-import { V1_COMPANY_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "./v1";
+import { V1_COMPANY_RULE_ROWS, V1_FILING_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "./v1";
 
 // Payroll settings are company-wide, but rules attach to an employment type, so they are stored for
 // both types and always written together.
@@ -71,5 +71,22 @@ describe("company details", () => {
   it("refuse a blank name", () => {
     const blank = [...rows, ...(["full_time", "intern"] as const).map((employmentType) => ({ ...setting(employmentType, "2026-01-01", { name: " ", address_lines: [], show_logo: false }), key: "company_details" as const }))];
     expect(() => resolveCompanyDetails(blank, october)).toThrow();
+  });
+});
+
+describe("filing settings", () => {
+  const withFiling = [...rows, ...V1_FILING_RULE_ROWS];
+
+  it("start with reminders on the 5th, 8th and 10th", () => {
+    expect(resolveFilingSettings(withFiling, october)).toMatchObject({ reminderDays: [5, 8, 10] });
+  });
+
+  it.each([
+    ["no days at all", { reminder_days: [] }],
+    ["a day past the 28th", { reminder_days: [5, 31] }],
+    ["the same day twice", { reminder_days: [5, 5] }],
+  ])("refuse %s", (_label, value) => {
+    const bad = [...rows, ...(["full_time", "intern"] as const).map((employmentType) => ({ ...setting(employmentType, "2026-01-01", value), key: "filing_settings" as const }))];
+    expect(() => resolveFilingSettings(bad, october)).toThrow();
   });
 });

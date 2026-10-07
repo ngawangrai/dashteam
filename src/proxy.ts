@@ -25,7 +25,9 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const signedIn = Boolean(data?.claims?.sub);
   // Signed-in people on /login are sent home by the login page itself, which knows their role.
-  if (!signedIn && !PUBLIC_PATHS.has(request.nextUrl.pathname)) {
+  // Scheduled jobs carry their own secret instead of a session; their routes check it.
+  const scheduledJob = request.nextUrl.pathname.startsWith("/api/cron/");
+  if (!signedIn && !scheduledJob && !PUBLIC_PATHS.has(request.nextUrl.pathname)) {
     return redirectKeepingCookies(new URL("/login", request.url), response);
   }
   return response;

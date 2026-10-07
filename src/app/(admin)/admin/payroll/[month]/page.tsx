@@ -4,6 +4,7 @@ import { ButtonLink } from "@/components/button-link";
 import { EmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icon";
 import { InsetSection } from "@/components/inset-section";
+import { LinkRow } from "@/components/link-row";
 import { Page } from "@/components/page";
 import { DeliveryList } from "@/components/documents/delivery-list";
 import { ChecksList } from "@/components/run/checks-list";
@@ -64,6 +65,9 @@ export default async function PayrollMonthPage({ params }: Params) {
             remit: run.remitCh ?? 0,
           }}
         />
+        <InsetSection>
+          <LinkRow href={`/admin/payroll/${key}/filing`} title="File with DRC" detail="The IT-1(a), and the record once it’s filed" />
+        </InsetSection>
         {people.length ? <DeliveryList runId={run.id} rows={deliveries} /> : null}
         {people.length ? (
           <LockedReview

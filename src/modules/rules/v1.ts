@@ -161,3 +161,17 @@ export const V1_COMPANY_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const
   effectiveFrom: V1_EFFECTIVE_FROM,
   value: V1_COMPANY_VALUE,
 }));
+
+// ── Filing settings (milestone 6) ───────────────────────────────────────────────
+// TDS for a month is due on the 10th of the next; admins are reminded on the 5th, 8th and the 10th itself.
+
+export const V1_FILING_VALUE = { reminder_days: [5, 8, 10] };
+export const V1_FILING_NOTE = "TDS filing reminders on the 5th, 8th and 10th until the month is filed";
+
+export const V1_FILING_RULE_ROWS: RuleRow[] = (["full_time", "intern"] as const).map((employmentType) => ({
+  id: `v1:filing_settings:${employmentType}`,
+  key: "filing_settings",
+  employmentType,
+  effectiveFrom: V1_EFFECTIVE_FROM,
+  value: V1_FILING_VALUE,
+}));

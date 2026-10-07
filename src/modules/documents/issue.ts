@@ -136,13 +136,18 @@ async function readdressFailed(payslipIds: string[], actor: Actor): Promise<void
 /** issuePayslips for a locked month, by month. Never throws: it runs in the background after a lock. */
 export async function issuePayslipsForMonth(month: PayrollMonth, actor: Actor): Promise<void> {
   try {
-    const [run] = await asUser(claimsFor(actor), (tx) =>
-      tx.select({ id: payrollRuns.id }).from(payrollRuns).where(and(eq(payrollRuns.month, firstOfMonth(month)), eq(payrollRuns.status, "locked"))).limit(1),
-    );
-    if (run) await issuePayslips(run.id, actor);
+    const runId = await lockedRunId(month, actor);
+    if (runId) await issuePayslips(runId, actor);
   } catch {
     // Whatever didn't happen shows on the month as not made or waiting, with Try again.
   }
+}
+
+export async function lockedRunId(month: PayrollMonth, actor: Actor): Promise<string | null> {
+  const [run] = await asUser(claimsFor(actor), (tx) =>
+    tx.select({ id: payrollRuns.id }).from(payrollRuns).where(and(eq(payrollRuns.month, firstOfMonth(month)), eq(payrollRuns.status, "locked"))).limit(1),
+  );
+  return run?.id ?? null;
 }
 
 // ── Sending ─────────────────────────────────────────────────────────────────────

@@ -16,6 +16,14 @@ export const serverEnvSchema = z.object({
   MAILPIT_URL: z.url().optional(),
   // Where links in emails point.
   APP_URL: z.url().default("http://localhost:3000"),
+  // The daily filing reminder job sends this as a bearer token. Without it, the job's route refuses everything.
+  CRON_SECRET: z.string().min(32).optional(),
+  // Tests only: pretend today is this date (YYYY-MM-DD) for due dates and reminders. Honoured only
+  // when ALLOW_TEST_CLOCK=1, which only the Playwright config sets; never set it on a real deployment.
+  FILING_TODAY: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 export const serverEnv = serverEnvSchema.parse({
@@ -27,4 +35,6 @@ export const serverEnv = serverEnvSchema.parse({
   // Local development falls back to the Mailpit the Supabase stack runs; production never does.
   MAILPIT_URL: process.env.MAILPIT_URL || (process.env.NODE_ENV === "production" ? undefined : "http://127.0.0.1:54324"),
   APP_URL: process.env.APP_URL || undefined,
+  CRON_SECRET: process.env.CRON_SECRET || undefined,
+  FILING_TODAY: process.env.ALLOW_TEST_CLOCK === "1" ? process.env.FILING_TODAY || undefined : undefined,
 });

@@ -32,3 +32,11 @@ export function asUser<T>(claims: JwtClaims, run: (tx: Tx) => Promise<T>): Promi
     return run(tx);
   });
 }
+
+/**
+ * Runs on the server's own connection, with no signed-in person and so no RLS. Only for work no
+ * person starts: the daily filing reminder job (behind its secret). Everything else uses asUser.
+ */
+export function asSystem<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
+  return baseDb.transaction(run);
+}

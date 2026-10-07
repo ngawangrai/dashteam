@@ -4,7 +4,7 @@ import { calculatePay, type PayInput } from "@/modules/payroll";
 import { resolveRules } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
 import type { EmploymentType, RuleKey, RuleRow } from "@/modules/rules/types";
-import { V1_COMPANY_RULE_ROWS, V1_LEAVE_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "@/modules/rules/v1";
+import { V1_COMPANY_RULE_ROWS, V1_FILING_RULE_ROWS, V1_LEAVE_RULE_ROWS, V1_RULE_ROWS, V1_SETTINGS_RULE_ROWS } from "@/modules/rules/v1";
 import { ADMIN_ID, EMPLOYEE_ID, as, rolledBack } from "./local-db";
 
 type DbRule = { id: string; key: RuleKey; employment_type: EmploymentType; effective_from: string; value: unknown };
@@ -16,7 +16,7 @@ async function ruleRows(tx: postgres.TransactionSql): Promise<RuleRow[]> {
   );
 }
 
-const ALL_V1_ROWS = [...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS, ...V1_SETTINGS_RULE_ROWS, ...V1_COMPANY_RULE_ROWS];
+const ALL_V1_ROWS = [...V1_RULE_ROWS, ...V1_LEAVE_RULE_ROWS, ...V1_SETTINGS_RULE_ROWS, ...V1_COMPANY_RULE_ROWS, ...V1_FILING_RULE_ROWS];
 const october = { year: 2026, month: 10 };
 const november = { year: 2026, month: 11 };
 const fullTimeInput = (month = october): PayInput => ({

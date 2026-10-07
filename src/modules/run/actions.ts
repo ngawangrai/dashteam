@@ -11,6 +11,7 @@ import { payrollAcknowledgements, payrollLines, payrollRuns, payrollSnapshots, r
 import { addMonths, firstOfMonth, formatMonth, formatNu, parseNu } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
 import { issuePayslipsForMonth } from "@/modules/documents/issue";
+import { makeScheduleForMonth } from "@/modules/filing/issue";
 import { thisMonth } from "@/modules/people/repository";
 import { resolvePayrollSettings } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
@@ -276,7 +277,10 @@ export async function lockPayroll(monthKey: string): Promise<LockResult> {
     if (outcome === "not_ready") return { status: "error", message: `Some checks still need you. Go back to ${name} to look at them.` };
     // Payslips are made and emailed once the lock has committed, so nothing about them can fail it.
     // Safe to schedule again for a month already locked: it only does what's missing.
-    after(() => issuePayslipsForMonth(month, admin));
+    after(async () => {
+      await issuePayslipsForMonth(month, admin);
+      await makeScheduleForMonth(month, admin);
+    });
     revalidatePath("/", "layout");
     if (outcome === "already") return { status: "locked", message: `${name} payroll is already locked.`, redirectTo };
     return { status: "locked", message: `${name} payroll is locked.`, redirectTo };

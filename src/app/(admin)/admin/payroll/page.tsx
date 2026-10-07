@@ -57,6 +57,7 @@ export default async function PayrollPage() {
       </section>
 
       <InsetSection title="Locked" footer={`DashTeam pays from ${formatMonth(overview.firstMonth, { withYear: true })}.`}>
+        <LinkRow href="/admin/filing" title="TDS filing" detail="Every month’s filing, what was paid and when" />
         {overview.locked.length ? (
           overview.locked.map((run) => {
             const month = monthOf(run.month);

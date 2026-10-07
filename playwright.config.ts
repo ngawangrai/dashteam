@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { FILING_TODAY, TEST_CRON_SECRET } from "./tests/e2e/test-clock";
 
 const baseURL = "http://localhost:3000";
+
+
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -20,6 +23,8 @@ export default defineConfig({
     command: process.env.CI ? "pnpm start" : "pnpm dev",
     url: `${baseURL}/login`,
     reuseExistingServer: !process.env.CI,
+    // The filing tests play a fixed day; only the test server honours it (ALLOW_TEST_CLOCK).
+    env: { ALLOW_TEST_CLOCK: "1", FILING_TODAY, CRON_SECRET: TEST_CRON_SECRET },
     timeout: 120_000,
   },
 });

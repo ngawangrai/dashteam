@@ -682,3 +682,91 @@ export const emailDeliveries = pgTable(
 ).enableRLS();
 
 export type EmailDelivery = typeof emailDeliveries.$inferSelect;
+
+// ── TDS filing (milestone 6) ────────────────────────────────────────────────────
+// The IT-1(a) schedule for a locked month, made once from its snapshots and never changed; the filing
+// record the admin keeps (when filed, payment reference, acknowledgement); receipts they upload; and
+// the reminders sent. Admins only. Guards, audit and the reminder functions are in a custom migration.
+
+export const it1aSchedules = pgTable(
+  "it1a_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id),
+    month: date("month").notNull(),
+    // The schedule's rows (TPN shown only as the last 4) and totals, for the screens.
+    rows: jsonb("rows").notNull(),
+    totals: jsonb("totals").notNull(),
+    // The upload file: DRC's template, filled in.
+    xls: bytea("xls").notNull(),
+    xlsSha256: text("xls_sha256").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    generatedBy: uuid("generated_by").references(() => authUsers.id),
+  },
+  (table) => [unique("it1a_schedules_run").on(table.runId), adminOnly("it1a_schedules_admin")],
+).enableRLS();
+
+export const filingReceipts = pgTable(
+  "filing_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id),
+    filename: text("filename").notNull(),
+    contentType: text("content_type").notNull(),
+    bytes: bytea("bytes").notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => authUsers.id),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("filing_receipts_type", sql`${table.contentType} in ('application/pdf', 'image/png', 'image/jpeg')`),
+    check("filing_receipts_size", sql`octet_length(${table.bytes}) between 1 and 5242880`),
+    adminOnly("filing_receipts_admin"),
+  ],
+).enableRLS();
+
+export const filings = pgTable(
+  "filings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => payrollRuns.id),
+    month: date("month").notNull(),
+    filedOn: date("filed_on"),
+    paymentReference: text("payment_reference"),
+    acknowledgementNumber: text("acknowledgement_number"),
+    receiptId: uuid("receipt_id").references(() => filingReceipts.id),
+    // People ticked off on the manual-entry screen, so the list survives a reload or another device.
+    entered: jsonb("entered").notNull().default(sql`'[]'::jsonb`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: uuid("updated_by").references(() => authUsers.id),
+  },
+  (table) => [
+    unique("filings_run").on(table.runId),
+    // Filed means a date, a payment reference, and an acknowledgement: a number or a receipt.
+    check(
+      "filings_filed_complete",
+      sql`${table.filedOn} is null or (${table.paymentReference} is not null and (${table.acknowledgementNumber} is not null or ${table.receiptId} is not null))`,
+    ),
+    adminOnly("filings_admin"),
+  ],
+).enableRLS();
+
+export type Filing = typeof filings.$inferSelect;
+
+// One row per day a reminder went out: the unique date is what makes the daily job send at most once.
+export const filingReminders = pgTable(
+  "filing_reminders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sentOn: date("sent_on").notNull(),
+    months: jsonb("months").notNull(),
+    recipients: text("recipients").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique("filing_reminders_sent_on").on(table.sentOn), adminOnly("filing_reminders_admin")],
+).enableRLS();
