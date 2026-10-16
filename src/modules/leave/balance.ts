@@ -1,4 +1,4 @@
-import { addMonths, monthOf } from "@/lib/format";
+import { addMonths, formatDays, monthOf } from "@/lib/format";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
 import { lockedMessage } from "@/modules/run/locked";
 import type { ChildOrder, EmploymentType, LeaveAllowance, LeaveType, RuleRow } from "@/modules/rules/types";
@@ -18,8 +18,11 @@ export type LeaveRequestFacts = LeaveSpan & {
 
 export type Employment = { startDate: string; endDate: string | null };
 
+/** Leave taken before DashTeam started, entered once for that leave year. Counts as used. */
+export type OpeningLeave = { leaveType: LeaveType; year: number; days: number };
+
 export type Balance =
-  | { kind: "pool"; entitlement: number; used: number; pending: number; left: number; count: "working" | "calendar" }
+  | { kind: "pool"; entitlement: number; used: number; pending: number; left: number; count: "working" | "calendar"; /** Of used, taken before DashTeam. */ opening: number }
   | { kind: "perEvent"; allowance: number; count: "working" | "calendar" }
   | { kind: "noLimit"; used: number; pending: number; count: "working" | "calendar" }
   | { kind: "notOffered" };
@@ -64,6 +67,7 @@ type BalanceInput = {
   ruleRows: readonly RuleRow[];
   calendar: LeaveCalendar;
   childOrder?: ChildOrder | null;
+  opening?: readonly OpeningLeave[];
 };
 
 function usedAndPending(input: BalanceInput, count: "working" | "calendar") {
@@ -90,8 +94,10 @@ export function balanceFor(input: BalanceInput): Balance {
       const months = monthsEmployedInYear(input.year, input.person, rules.prorationCutoffDay);
       const entitlement = entitlementFor(allowance, months);
       // Carry-forward is a rule; it is 0 for every type in V1.
-      const { used, pending } = usedAndPending(input, count);
-      return { kind: "pool", entitlement, used, pending, left: entitlement - used - pending, count };
+      const { used: requested, pending } = usedAndPending(input, count);
+      const opening = (input.opening ?? []).filter((o) => o.leaveType === input.leaveType && o.year === input.year).reduce((sum, o) => sum + o.days, 0);
+      const used = requested + opening;
+      return { kind: "pool", entitlement, used, pending, left: entitlement - used - pending, count, opening };
     }
     case "perEvent": {
       const later = input.childOrder === "later" && allowance.laterChildDays !== null;
@@ -182,7 +188,7 @@ export function assessRequest(
       const balance = balanceFor({ ...context, leaveType: request.leaveType, year });
       if (balance.kind !== "pool") continue;
       const after = balance.left - daysInYear(counted.byDate, year);
-      if (after < 0) return { ok: false, reason: `That’s more than the ${balance.left} days you have left.`, days };
+      if (after < 0) return { ok: false, reason: `That’s more than the ${formatDays(balance.left)} you have left.`, days };
       leftAfter ??= after;
     }
     return { ok: true, days, leftAfter, allowance: null, count: policy.count };

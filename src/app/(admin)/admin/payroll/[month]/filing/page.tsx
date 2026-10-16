@@ -13,12 +13,43 @@ import { requireRole } from "@/lib/auth/session";
 import { formatDate, formatLongDate, formatMonth } from "@/lib/format";
 import { dueStatus } from "@/modules/filing/due";
 import { dueWords } from "@/modules/filing/emails";
-import { filingFor, filingToday } from "@/modules/filing/repository";
+import { type FilingDetail, filingFor, filingToday } from "@/modules/filing/repository";
 import { monthFromKey } from "@/modules/run/months";
 
 type Params = { params: Promise<{ month: string }> };
 
 export const metadata = { title: "TDS filing" };
+
+function filedValues(filing: FilingDetail, today: string) {
+  return filing.state === "filed"
+    ? { filedOn: filing.filedOn ?? today, paymentReference: filing.paymentReference ?? "", acknowledgementNumber: filing.acknowledgementNumber ?? "", receiptName: filing.receipt?.filename ?? null }
+    : undefined;
+}
+
+/** When and how the month was filed, as recorded. */
+function FiledRecord({ filing, monthKey }: { filing: FilingDetail; monthKey: string }) {
+  return (
+    <InsetSection title="Filed">
+      <InsetRow label="Filed on">
+        <span className="tabular text-label">{formatDate(filing.filedOn ?? "")}</span>
+      </InsetRow>
+      <InsetRow label="Payment reference">
+        <span className="break-all text-label">{filing.paymentReference}</span>
+      </InsetRow>
+      {filing.acknowledgementNumber ? (
+        <InsetRow label="Acknowledgement">
+          <span className="break-all text-label">{filing.acknowledgementNumber}</span>
+        </InsetRow>
+      ) : null}
+      {filing.receipt ? (
+        <a href={`/admin/payroll/${monthKey}/filing/receipt`} target="_blank" rel="noopener" className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-body text-accent hover:bg-fill/60">
+          <Icon icon={FileCheck2} size={20} />
+          View receipt
+        </a>
+      ) : null}
+    </InsetSection>
+  );
+}
 
 /** One month's TDS filing: what to pay DRC and by when, the IT-1(a) to upload, and the record of filing it. */
 export default async function FilingPage({ params }: Params) {
@@ -30,8 +61,32 @@ export default async function FilingPage({ params }: Params) {
   const today = filingToday();
   const name = formatMonth(month);
   const title = `${formatMonth(month, { withYear: true })} TDS`;
-  const due = formatLongDate(filing.dueDate).replace(/ \d{4}$/, "");
   const back = { href: `/admin/payroll/${key}` as const, label: formatMonth(month, { withYear: true }) };
+
+  // A month brought in from before DashTeam: filed back then. Its record can be noted here.
+  if (filing.imported || filing.dueDate === null) {
+    return (
+      <Page title={title} subtitle={filing.state === "filed" && filing.filedOn ? `Filed ${formatDate(filing.filedOn)}` : "Imported. Note when it was filed, so the history is complete."} back={back}>
+        <InsetSection title="TDS and HC for the month" footer="Brought in from records kept before DashTeam. There’s no IT-1(a) file for it here.">
+          <InsetRow label="TDS">
+            <Money amount={filing.tds ?? 0} className="text-label" />
+          </InsetRow>
+          <InsetRow label="Health contribution">
+            <Money amount={filing.hc ?? 0} className="text-label" />
+          </InsetRow>
+          <InsetRow label="Total">
+            <Money amount={filing.remit ?? 0} className="font-semibold text-label" />
+          </InsetRow>
+        </InsetSection>
+        {filing.state === "filed" ? <FiledRecord filing={filing} monthKey={key} /> : null}
+        <div className="flex justify-center">
+          <MarkFiledSheet monthKey={key} monthName={name} today={today} current={filedValues(filing, today)} />
+        </div>
+      </Page>
+    );
+  }
+
+  const due = formatLongDate(filing.dueDate).replace(/ \d{4}$/, "");
 
   if (filing.state === "draft") {
     return (
@@ -115,27 +170,7 @@ export default async function FilingPage({ params }: Params) {
         </InsetSection>
       ) : null}
 
-      {filing.state === "filed" ? (
-        <InsetSection title="Filed">
-          <InsetRow label="Filed on">
-            <span className="tabular text-label">{formatDate(filing.filedOn ?? "")}</span>
-          </InsetRow>
-          <InsetRow label="Payment reference">
-            <span className="break-all text-label">{filing.paymentReference}</span>
-          </InsetRow>
-          {filing.acknowledgementNumber ? (
-            <InsetRow label="Acknowledgement">
-              <span className="break-all text-label">{filing.acknowledgementNumber}</span>
-            </InsetRow>
-          ) : null}
-          {filing.receipt ? (
-            <a href={`/admin/payroll/${key}/filing/receipt`} target="_blank" rel="noopener" className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-body text-accent hover:bg-fill/60">
-              <Icon icon={FileCheck2} size={20} />
-              View receipt
-            </a>
-          ) : null}
-        </InsetSection>
-      ) : null}
+      {filing.state === "filed" ? <FiledRecord filing={filing} monthKey={key} /> : null}
 
       {filing.state !== "not_made" ? (
         <div className="flex justify-center">
@@ -143,16 +178,7 @@ export default async function FilingPage({ params }: Params) {
             monthKey={key}
             monthName={name}
             today={today}
-            current={
-              filing.state === "filed"
-                ? {
-                    filedOn: filing.filedOn ?? today,
-                    paymentReference: filing.paymentReference ?? "",
-                    acknowledgementNumber: filing.acknowledgementNumber ?? "",
-                    receiptName: filing.receipt?.filename ?? null,
-                  }
-                : undefined
-            }
+            current={filedValues(filing, today)}
           />
         </div>
       ) : null}

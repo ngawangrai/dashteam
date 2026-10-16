@@ -20,6 +20,8 @@ const plainDate = z
   .transform((value) => value as PlainDate);
 
 const fullName = z.string().trim().min(1, "Enter their name.").max(100, "That name is too long.");
+// Optional until their first salary certificate, which asks for it if it's missing.
+const jobTitle = z.preprocess(blankToNull, z.string().trim().max(80, "Keep the job title under 80 characters.").nullable().default(null));
 const email = z.string().trim().toLowerCase().pipe(z.email("Enter their email address."));
 
 const phone = z.preprocess(
@@ -65,7 +67,7 @@ const amount = (label: string) =>
 const positiveAmount = (label: string) => amount(label).refine((value) => value > 0, `Enter the ${label}.`);
 
 export const personDetailsSchema = z
-  .object({ fullName, email, phone, bankName, bankAccount, tpn, startDate: plainDate })
+  .object({ fullName, jobTitle, email, phone, bankName, bankAccount, tpn, startDate: plainDate })
   .refine((value) => value.bankAccount === null || value.bankName !== null, {
     message: "Choose the bank for this account.",
     path: ["bankName"],
@@ -89,7 +91,7 @@ export type PayFields = z.output<typeof payFieldsSchema>;
 export const newPersonSchema = z
   .intersection(personDetailsSchema, payFieldsSchema)
   .transform(({ employmentType, ...rest }) => {
-    const { fullName, email, phone, bankName, bankAccount, tpn, startDate } = rest;
+    const { fullName, jobTitle, email, phone, bankName, bankAccount, tpn, startDate } = rest;
     const pay =
       employmentType === "intern"
         ? { employmentType, stipend: (rest as { stipend: number }).stipend }
@@ -98,7 +100,7 @@ export const newPersonSchema = z
             basic: (rest as { basic: number }).basic,
             allowances: (rest as { allowances: number }).allowances,
           };
-    return { fullName, email, phone, bankName, bankAccount, tpn, startDate, pay };
+    return { fullName, jobTitle, email, phone, bankName, bankAccount, tpn, startDate, pay };
   });
 
 export type NewPerson = z.output<typeof newPersonSchema>;

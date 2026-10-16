@@ -15,20 +15,24 @@ import type { ScheduleRow, ScheduleTotals } from "./schedule";
 
 // Reads for the filing screens and the admin home. Admins only (RLS). A month's state is worked out
 // from what exists, never stored: Draft until it's locked, Ready once its schedule is made, Filed
-// once the admin records the filing.
+// once the admin records the filing. A month brought in from before DashTeam has no schedule (it was
+// filed then); it's Unrecorded until its past filing is noted, for a complete history.
 
 /** Today in Thimphu. Tests may fix the date with FILING_TODAY; production never reads it. */
 export function filingToday(): string {
   return serverEnv.FILING_TODAY ?? thimphuToday();
 }
 
-export type FilingState = "draft" | "not_made" | "ready" | "filed";
+export type FilingState = "draft" | "not_made" | "ready" | "filed" | "unrecorded";
 
 export type FilingMonthView = {
   month: PayrollMonth;
   monthKey: string;
   state: FilingState;
-  dueDate: string;
+  /** Brought in from before DashTeam. */
+  imported: boolean;
+  /** Null for an imported month: it was due before DashTeam, under rules it doesn't hold. */
+  dueDate: string | null;
   runId: string | null;
   remit: Chhertum | null;
   tds: Chhertum | null;
@@ -67,12 +71,14 @@ function viewOf(month: PayrollMonth, data: Loaded): FilingMonthView {
   const filing = run ? data.filingRows.find((f) => f.runId === run.id) : undefined;
   const schedule = run ? data.schedules.find((s) => s.runId === run.id) : undefined;
   const receipt = filing?.receiptId ? data.receipts.find((r) => r.id === filing.receiptId) : undefined;
-  const state: FilingState = !run ? "draft" : filing?.filedOn ? "filed" : schedule ? "ready" : "not_made";
+  const imported = run?.source === "imported";
+  const state: FilingState = !run ? "draft" : filing?.filedOn ? "filed" : imported ? "unrecorded" : schedule ? "ready" : "not_made";
   return {
     month,
     monthKey: keyOf(month),
     state,
-    dueDate: run?.dueDate ?? dueDateFor(month, resolvePayrollSettings(data.ruleRows, month).dueDay),
+    imported,
+    dueDate: imported ? null : (run?.dueDate ?? dueDateFor(month, resolvePayrollSettings(data.ruleRows, month).dueDay)),
     runId: run?.id ?? null,
     remit: run?.remitCh ?? null,
     tds: run?.tdsCh ?? null,
@@ -89,7 +95,10 @@ function firstMonthOf(data: Loaded): PayrollMonth | null {
   return resolvePayrollSettings(data.ruleRows, monthOf(filingToday())).firstMonth;
 }
 
-/** Every month from DashTeam's first to last month (and any locked since), newest first. */
+/**
+ * Every month from DashTeam's first to last month (and any locked since), newest first, then the
+ * months brought in from before it.
+ */
 export async function filingHistory(user: SessionUser): Promise<FilingMonthView[]> {
   return asUser(claimsFor(user), async (tx) => {
     const data = await load(tx);
@@ -100,6 +109,8 @@ export async function filingHistory(user: SessionUser): Promise<FilingMonthView[
     const end = latestLocked && index(latestLocked) > index(lastMonth) ? latestLocked : lastMonth;
     const months: FilingMonthView[] = [];
     for (let m = end; index(m) >= index(first); m = addMonths(m, -1)) months.push(viewOf(m, data));
+    // data.runs is newest first, so these stay in order.
+    for (const run of data.runs.filter((r) => r.source === "imported" && index(monthOf(r.month)) < index(first))) months.push(viewOf(monthOf(run.month), data));
     return months;
   });
 }
@@ -136,7 +147,7 @@ export async function dueCard(user: SessionUser): Promise<DueCard | null> {
     const [next] = toFile;
     if (!next) return null;
     const view = viewOf(next, data);
-    return { month: next, monthKey: view.monthKey, status: dueStatus(filingToday(), view.dueDate), remit: view.remit, locked: view.state !== "draft", more: toFile.length - 1 };
+    return { month: next, monthKey: view.monthKey, status: dueStatus(filingToday(), view.dueDate ?? dueDateFor(next, resolvePayrollSettings(data.ruleRows, next).dueDay)), remit: view.remit, locked: view.state !== "draft", more: toFile.length - 1 };
   });
 }
 

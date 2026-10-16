@@ -58,6 +58,7 @@ export default async function PayrollPage() {
 
       <InsetSection title="Locked" footer={`DashTeam pays from ${formatMonth(overview.firstMonth, { withYear: true })}.`}>
         <LinkRow href="/admin/filing" title="TDS filing" detail="Every month’s filing, what was paid and when" />
+        <LinkRow href="/admin/payroll/import" title="Bring in past months" detail={`Months before ${formatMonth(overview.firstMonth, { withYear: true })}, from your old records`} />
         {overview.locked.length ? (
           overview.locked.map((run) => {
             const month = monthOf(run.month);
@@ -66,7 +67,7 @@ export default async function PayrollPage() {
                 key={run.id}
                 href={`/admin/payroll/${monthKey(month)}`}
                 title={formatMonth(month, { withYear: true })}
-                detail={`${run.peopleCount === 1 ? "1 person" : `${run.peopleCount} people`} · locked ${formatDate(thimphuToday(run.lockedAt ?? new Date()))}`}
+                detail={`${run.peopleCount === 1 ? "1 person" : `${run.peopleCount} people`} · ${run.source === "imported" ? "imported" : `locked ${formatDate(thimphuToday(run.lockedAt ?? new Date()))}`}`}
                 trailing={<Money amount={run.takeHomeCh ?? 0} />}
               />
             );

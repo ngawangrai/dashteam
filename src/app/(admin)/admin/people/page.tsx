@@ -41,6 +41,9 @@ export default async function PeoplePage() {
               <p className="px-4 py-3 text-body text-label-secondary">No one is working here right now.</p>
             )}
           </InsetSection>
+          <InsetSection>
+            <LinkRow href="/admin/people/opening-leave" title="Leave taken before DashTeam" detail="So this year’s balances are right from the start" />
+          </InsetSection>
           {former.length ? (
             <InsetSection title="Former">
               {former.map((person) => (

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PayslipModel } from "./model";
-import { renderPayslip } from "./render";
+import { certificateModel } from "./certificate-model";
+import { renderCertificate, renderPayslip, renderStatement } from "./render";
+import { statementModel } from "./statement-model";
 
 const nu = (amount: number) => amount * 100;
 
@@ -42,5 +44,76 @@ describe("the payslip PDF", () => {
     const many = { ...model, earnings: [...model.earnings, ...Array.from({ length: 8 }, (_, i) => ({ label: "Bonus", detail: `Line ${i + 1}`, amount: nu(100) }))] };
     const { pdf } = await renderPayslip(many);
     expect(pdf.toString("latin1").match(/\/Type\s*\/Page\b/g)).toHaveLength(1);
+  });
+});
+
+const pages = (pdf: Buffer) => pdf.toString("latin1").match(/\/Type\s*\/Page\b/g)?.length ?? 0;
+const COMPANY = { name: "Xceed Studio", addressLines: ["Norzin Lam, Thimphu"], showLogo: false, ruleIds: [] };
+
+describe("the pay statement PDF", () => {
+  const month = (i: number) => ({ year: 2025 + Math.floor((i + 9) / 12), month: ((i + 9) % 12) + 1 });
+  const snapshots = Array.from({ length: 12 }, (_, i) => ({ month: month(i), employmentType: "full_time" as const, gross: nu(45_000), takeHome: nu(41_967), imported: i < 4 }));
+  const statement = (count: number) =>
+    statementModel({
+      person: { name: "Sonam Wangmo", tpnLast4: "0012" },
+      range: { from: month(0), to: month(count - 1) },
+      snapshots: snapshots.slice(0, count),
+      company: COMPANY,
+      reference: "XS-PS-2026-0001",
+      issuedOn: "2026-10-07",
+    });
+
+  it("fits twelve months, imported and live, on one A4 page", async () => {
+    const { pdf, sha256 } = await renderStatement(statement(12));
+    expect(pdf.toString("latin1").startsWith("%PDF-")).toBe(true);
+    expect(pages(pdf)).toBe(1);
+    expect(sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("the salary certificate PDF", () => {
+  const letter = certificateModel({
+    person: { name: "Sonam Wangmo", jobTitle: "Product Designer", startDate: "2025-03-03" },
+    terms: { effectiveFrom: "2025-03-01", employmentType: "full_time", basic: nu(40_000), allowances: nu(5_000) },
+    addressee: "The Manager\nBank of Bhutan, Thimphu",
+    purpose: "a home loan application",
+    signatory: { name: "Tashi Dorji", title: "Founder" },
+    company: COMPANY,
+    reference: "XS-SC-2026-001",
+    issuedOn: "2026-10-07",
+  });
+  // A 1×1 transparent PNG stands in for a signature.
+  const signature = { data: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64"), format: "png" as const };
+
+  it("is one A4 page, with or without a signature", async () => {
+    expect(pages((await renderCertificate(letter, signature)).pdf)).toBe(1);
+    expect(pages((await renderCertificate(letter, null)).pdf)).toBe(1);
+  });
+});
+
+describe("every document lays out the same, whatever was rendered before it", () => {
+  // react-pdf keeps parsed fonts between renders; reused fonts once split "of" across two lines in a
+  // certificate rendered after a payslip. Each render now loads its own.
+  const strip = (pdf: Buffer) => pdf.toString("latin1").replace(/\/CreationDate[^/]*|\/ModDate[^/]*|\/ID \[[^\]]*\]/g, "");
+  const letter = certificateModel({
+    person: { name: "Sonam Wangmo", jobTitle: "Product Designer", startDate: "2025-03-03" },
+    terms: { effectiveFrom: "2025-03-01", employmentType: "full_time", basic: nu(40_000), allowances: nu(5_000) },
+    addressee: "",
+    purpose: "a home loan application",
+    signatory: { name: "Tashi Dorji", title: "Founder" },
+    company: COMPANY,
+    reference: "XS-SC-2026-001",
+    issuedOn: "2026-10-07",
+  });
+
+  it("a certificate after a payslip is the certificate on its own", async () => {
+    const alone = strip((await renderCertificate(letter, null)).pdf);
+    await renderPayslip(model);
+    expect(strip((await renderCertificate(letter, null)).pdf)).toBe(alone);
+  });
+
+  it("documents rendered at the same time come out whole", async () => {
+    const results = await Promise.all([renderPayslip(model), renderCertificate(letter, null), renderPayslip(model)]);
+    expect(results.map((result) => pages(result.pdf))).toEqual([1, 1, 1]);
   });
 });

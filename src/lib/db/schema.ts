@@ -120,6 +120,8 @@ export const people = pgTable(
     bankAccountLast4: text("bank_account_last4"),
     tpnCiphertext: text("tpn_ciphertext"),
     tpnLast4: text("tpn_last4"),
+    // What they do at Xceed, as it reads on a salary certificate ("Product Designer").
+    jobTitle: text("job_title"),
     startDate: date("start_date").notNull(),
     // Last working day. They keep access until the end of this day.
     endDate: date("end_date"),
@@ -464,11 +466,37 @@ export type LeaveNotice = typeof leaveNotices.$inferSelect;
 // inside a locked month is refused by triggers (custom migration), even for the database owner.
 
 export const payrollRunStatus = pgEnum("payroll_run_status", ["draft", "locked"]);
+// Live: worked out and locked in DashTeam. Imported: a month before DashTeam, brought in from a file.
+export const payrollRunSource = pgEnum("payroll_run_source", ["live", "imported"]);
 export const payrollLineKind = pgEnum("payroll_line_kind", LINE_KINDS);
 export const payrollLineSource = pgEnum("payroll_line_source", LINE_SOURCES);
 
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
 const adminOnly = (name: string) =>
   pgPolicy(name, { for: "all", to: authenticatedRole, using: sql`(select public.is_admin())`, withCheck: sql`(select public.is_admin())` });
+
+// ── Historical import (milestone 7) ──────────────────────────────────────────────
+// A file of months from before DashTeam, brought in as locked imported runs. The file is kept as it
+// was. Removing an import (allowed only until the first live month locks) stamps it here.
+export const payrollImports = pgTable(
+  "payroll_imports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    filename: text("filename").notNull(),
+    csv: bytea("csv").notNull(),
+    csvSha256: text("csv_sha256").notNull(),
+    months: date("months").array().notNull(),
+    rows: integer("rows").notNull(),
+    importedBy: uuid("imported_by").references(() => authUsers.id),
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    removedBy: uuid("removed_by").references(() => authUsers.id),
+  },
+  (table) => [check("payroll_imports_csv_size", sql`octet_length(${table.csv}) between 1 and 1048576`), adminOnly("payroll_imports_admin")],
+).enableRLS();
+
+export type PayrollImport = typeof payrollImports.$inferSelect;
 
 export const payrollRuns = pgTable(
   "payroll_runs",
@@ -476,6 +504,8 @@ export const payrollRuns = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     month: date("month").notNull(),
     status: payrollRunStatus("status").notNull().default("draft"),
+    source: payrollRunSource("source").notNull().default("live"),
+    importId: uuid("import_id").references(() => payrollImports.id),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     lockedBy: uuid("locked_by").references(() => authUsers.id),
     // Totals as locked, so the run list and remittance never need the snapshots.
@@ -501,8 +531,9 @@ export const payrollRuns = pgTable(
       sql`${table.status} = 'draft' or (${table.lockedAt} is not null and ${table.peopleCount} is not null and ${table.grossCh} is not null
         and ${table.healthContributionCh} is not null and ${table.providentFundCh} is not null and ${table.gisCh} is not null
         and ${table.tdsCh} is not null and ${table.recoveriesCh} is not null and ${table.takeHomeCh} is not null
-        and ${table.remitCh} is not null and ${table.dueDate} is not null and ${table.ruleIds} is not null)`,
+        and ${table.remitCh} is not null and (${table.dueDate} is not null or ${table.source} = 'imported') and ${table.ruleIds} is not null)`,
     ),
+    check("payroll_runs_import_matches_source", sql`(${table.source} = 'imported') = (${table.importId} is not null)`),
     adminOnly("payroll_runs_admin"),
   ],
 ).enableRLS();
@@ -587,8 +618,13 @@ export const payrollSnapshots = pgTable(
   },
   (table) => [
     unique("payroll_snapshots_run_person").on(table.runId, table.personId),
-    // Milestone 5 adds a policy so people can read their own.
     adminOnly("payroll_snapshots_admin"),
+    // People read their own locked months, for their pay statements.
+    pgPolicy("payroll_snapshots_select_own", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id())`,
+    }),
   ],
 ).enableRLS();
 
@@ -598,8 +634,6 @@ export type PayrollSnapshot = typeof payrollSnapshots.$inferSelect;
 // One per locked snapshot, built from it once and never changed. The PDF lives here, in Postgres, so
 // the nightly backup carries it. People read their own (RLS); files are served through short-lived
 // signed links after that check. Guards, audit and the email functions are in a custom migration.
-
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 export const payslips = pgTable(
   "payslips",
@@ -641,7 +675,7 @@ export const payslips = pgTable(
 
 export type Payslip = typeof payslips.$inferSelect;
 
-export const emailKind = pgEnum("email_kind", ["payslip", "payslip_resend", "payslip_self", "leave_requested", "leave_decided"]);
+export const emailKind = pgEnum("email_kind", ["payslip", "payslip_resend", "payslip_self", "leave_requested", "leave_decided", "certificate_issued"]);
 export const emailStatus = pgEnum("email_status", ["queued", "sending", "sent", "failed", "skipped"]);
 
 // Every email DashTeam sends, as a durable outbox: queued, claimed, then sent, failed or skipped.
@@ -654,6 +688,7 @@ export const emailDeliveries = pgTable(
     kind: emailKind("kind").notNull(),
     payslipId: uuid("payslip_id").references(() => payslips.id),
     leaveRequestId: uuid("leave_request_id").references(() => leaveRequests.id, { onDelete: "set null" }),
+    certificateId: uuid("certificate_id").references(() => salaryCertificates.id, { onDelete: "set null" }),
     toEmail: text("to_email").notNull(),
     dedupeKey: text("dedupe_key"),
     // What the email was about when it was queued, so a leave email is skipped if that changed.
@@ -769,4 +804,171 @@ export const filingReminders = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [unique("filing_reminders_sent_on").on(table.sentOn), adminOnly("filing_reminders_admin")],
+).enableRLS();
+
+// ── Opening leave (milestone 7) ─────────────────────────────────────────────────
+// Leave taken in the current leave year before DashTeam started, one number per person and type.
+// Counts as used in the balance. Can be changed until the first live month locks.
+export const leaveOpeningBalances = pgTable(
+  "leave_opening_balances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    leaveYear: integer("leave_year").notNull(),
+    leaveType: leaveType("leave_type").notNull(),
+    days: numeric("days", { precision: 5, scale: 1, mode: "number" }).notNull(),
+    // The day DashTeam started: the first day of the first payroll month.
+    asOf: date("as_of").notNull(),
+    note: text("note").notNull().default(""),
+    createdBy: uuid("created_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("leave_opening_balances_person_year_type").on(table.personId, table.leaveYear, table.leaveType),
+    check("leave_opening_balances_half_days", sql`${table.days} >= 0 and ${table.days} * 2 = floor(${table.days} * 2)`),
+    pgPolicy("leave_opening_balances_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("leave_opening_balances_write_admin", {
+      for: "all",
+      to: authenticatedRole,
+      using: sql`(select public.is_admin())`,
+      withCheck: sql`(select public.is_admin())`,
+    }),
+  ],
+).enableRLS();
+
+// ── Pay statements (milestone 7) ────────────────────────────────────────────────
+// One PDF across a range of locked months, made from the snapshots and stored as made. Never changed.
+export const payStatements = pgTable(
+  "pay_statements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    fromMonth: date("from_month").notNull(),
+    toMonth: date("to_month").notNull(),
+    issuedOn: date("issued_on").notNull(),
+    // XS-PS-2026-0004: the year issued, then its place among that year's statements.
+    reference: text("reference").notNull(),
+    content: jsonb("content").notNull(),
+    pdf: bytea("pdf").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    createdBy: uuid("created_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("pay_statements_reference").on(table.reference),
+    // The same range on the same day is the same statement: it's made once.
+    unique("pay_statements_person_range_day").on(table.personId, table.fromMonth, table.toMonth, table.issuedOn),
+    check("pay_statements_range", sql`${table.fromMonth} <= ${table.toMonth}`),
+    pgPolicy("pay_statements_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("pay_statements_insert_own_or_admin", {
+      for: "insert",
+      to: authenticatedRole,
+      withCheck: sql`(${table.personId} = (select public.current_person_id()) or (select public.is_admin())) and ${table.createdBy} = ${authUid}`,
+    }),
+  ],
+).enableRLS();
+
+// ── Salary certificates (milestone 7) ───────────────────────────────────────────
+export const certificateRequestStatus = pgEnum("certificate_request_status", ["pending", "issued", "declined", "withdrawn"]);
+
+// A person asks; an admin issues or declines. At most one waiting per person.
+export const certificateRequests = pgTable(
+  "certificate_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    addressee: text("addressee").notNull().default(""),
+    purpose: text("purpose").notNull().default(""),
+    status: certificateRequestStatus("status").notNull().default("pending"),
+    decisionNote: text("decision_note").notNull().default(""),
+    requestedBy: uuid("requested_by").references(() => authUsers.id),
+    decidedBy: uuid("decided_by").references(() => authUsers.id),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("certificate_requests_one_pending").on(table.personId).where(sql`${table.status} = 'pending'`),
+    check("certificate_requests_lengths", sql`char_length(${table.addressee}) <= 200 and char_length(${table.purpose}) <= 120 and char_length(${table.decisionNote}) <= 500`),
+    pgPolicy("certificate_requests_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("certificate_requests_insert_own", {
+      for: "insert",
+      to: authenticatedRole,
+      withCheck: sql`${table.personId} = (select public.current_person_id()) and ${table.status} = 'pending' and ${table.requestedBy} = ${authUid}`,
+    }),
+    pgPolicy("certificate_requests_update_own_or_admin", {
+      for: "update",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+      withCheck: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+  ],
+).enableRLS();
+
+// The signature printed on certificates. Uploaded once, never changed; the certificate settings rule
+// points at the one in force.
+export const signatureImages = pgTable(
+  "signature_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contentType: text("content_type").notNull(),
+    bytes: bytea("bytes").notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => authUsers.id),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("signature_images_type", sql`${table.contentType} in ('image/png', 'image/jpeg')`),
+    check("signature_images_size", sql`octet_length(${table.bytes}) between 1 and 512000`),
+    adminOnly("signature_images_admin"),
+  ],
+).enableRLS();
+
+// An issued certificate: the letter as it was on the day, stored once. A new request makes a new one.
+export const salaryCertificates = pgTable(
+  "salary_certificates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => certificateRequests.id),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id),
+    // XS-SC-2026-004: the year issued, then its place among that year's certificates.
+    reference: text("reference").notNull(),
+    issuedOn: date("issued_on").notNull(),
+    content: jsonb("content").notNull(),
+    pdf: bytea("pdf").notNull(),
+    pdfSha256: text("pdf_sha256").notNull(),
+    ruleIds: text("rule_ids").array().notNull(),
+    issuedBy: uuid("issued_by").references(() => authUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("salary_certificates_request").on(table.requestId),
+    unique("salary_certificates_reference").on(table.reference),
+    pgPolicy("salary_certificates_select_own_or_admin", {
+      for: "select",
+      to: authenticatedRole,
+      using: sql`${table.personId} = (select public.current_person_id()) or (select public.is_admin())`,
+    }),
+    pgPolicy("salary_certificates_insert_admin", { for: "insert", to: authenticatedRole, withCheck: sql`(select public.is_admin())` }),
+  ],
 ).enableRLS();

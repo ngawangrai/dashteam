@@ -34,8 +34,8 @@ export const LEAVE_RULE_KEYS = [
 
 // Company-wide settings: payroll (milestone 4) and the company's details on documents (milestone 5).
 // Stored for both employment types and written together.
-export type SettingsRuleKey = "payroll_settings" | "company_details" | "filing_settings";
-export const SETTINGS_RULE_KEYS = ["payroll_settings", "company_details", "filing_settings"] as const satisfies readonly SettingsRuleKey[];
+export type SettingsRuleKey = "payroll_settings" | "company_details" | "filing_settings" | "certificate_settings";
+export const SETTINGS_RULE_KEYS = ["payroll_settings", "company_details", "filing_settings", "certificate_settings"] as const satisfies readonly SettingsRuleKey[];
 
 export type RuleKey = PayrollRuleKey | LeaveRuleKey | SettingsRuleKey;
 // Order matters: it is the order of the database enum, which only ever grows at the end.
@@ -171,6 +171,13 @@ export type SettingsRuleValues = {
     /** Days of the month a reminder goes to admins while last month's TDS isn't filed. */
     reminderDays: number[];
   };
+  certificate_settings: {
+    /** Who signs salary certificates, as printed under the signature. */
+    signatoryName: string;
+    signatoryTitle: string;
+    /** The signature image (signature_images), or null to sign by hand after printing. */
+    signatureId: string | null;
+  };
 };
 
 export type RuleValues = PayrollRuleValues & LeaveRuleValues & SettingsRuleValues;
@@ -178,6 +185,7 @@ export type RuleValues = PayrollRuleValues & LeaveRuleValues & SettingsRuleValue
 export type PayrollSettings = SettingsRuleValues["payroll_settings"] & { ruleIds: string[] };
 export type CompanyDetails = SettingsRuleValues["company_details"] & { ruleIds: string[] };
 export type FilingSettings = SettingsRuleValues["filing_settings"] & { ruleIds: string[] };
+export type CertificateSettings = SettingsRuleValues["certificate_settings"] & { ruleIds: string[] };
 
 /** Every leave rule in force for one employment type in one month. */
 export type ResolvedLeaveRules = {

@@ -17,6 +17,7 @@ export type PersonView = {
   id: string;
   profileId: string | null;
   fullName: string;
+  jobTitle: string | null;
   email: string;
   phone: string | null;
   bankName: string | null;
@@ -55,6 +56,7 @@ function toPersonView(row: Person): PersonView {
     id: row.id,
     profileId: row.profileId,
     fullName: row.fullName,
+    jobTitle: row.jobTitle,
     email: row.email,
     phone: row.phone,
     bankName: row.bankName,

@@ -153,3 +153,32 @@ describe("leave in a locked payroll month", () => {
     expect(assessRequest(ask("2026-08-03", "2026-08-04"), context("employee")).ok).toBe(true);
   });
 });
+
+describe("leave taken before DashTeam started", () => {
+  const opening = [
+    { leaveType: "annual" as const, year: 2026, days: 7.5 },
+    { leaveType: "sick" as const, year: 2026, days: 2 },
+    { leaveType: "annual" as const, year: 2025, days: 10 },
+  ];
+  const withOpening = (fields: Partial<Parameters<typeof balanceFor>[0]> = {}) =>
+    balanceFor({ leaveType: "annual", year: 2026, employmentType: "full_time", person: longServing, requests: [], ruleRows: V1_LEAVE_RULE_ROWS, calendar, opening, ...fields });
+
+  it("counts as used in its own leave year and type only", () => {
+    expect(withOpening()).toMatchObject({ kind: "pool", entitlement: 25, used: 7.5, opening: 7.5, pending: 0, left: 17.5 });
+    expect(withOpening({ leaveType: "sick" })).toMatchObject({ entitlement: 14, used: 2, opening: 2, left: 12 });
+    expect(withOpening({ year: 2027 })).toMatchObject({ used: 0, opening: 0, left: 25 });
+  });
+
+  it("adds to leave taken in DashTeam, and works with a pro-rated entitlement", () => {
+    const joined = { startDate: "2026-03-16", endDate: null }; // 9 months: 19 days
+    const requests = [request({ startDate: "2026-10-12", endDate: "2026-10-13" }), request({ startDate: "2026-10-14", endDate: "2026-10-14", status: "pending", startHalf: true })];
+    expect(withOpening({ person: joined, requests })).toMatchObject({ entitlement: 19, used: 9.5, opening: 7.5, pending: 0.5, left: 9 });
+  });
+
+  it("leaves less room for a new request", () => {
+    const tight = [{ leaveType: "annual" as const, year: 2026, days: 24 }];
+    const context = { employmentType: "full_time" as const, person: longServing, requests: [], ruleRows: V1_LEAVE_RULE_ROWS, calendar, opening: tight };
+    const assessment = assessRequest({ leaveType: "annual", startDate: "2026-10-12", endDate: "2026-10-13", startHalf: false, endHalf: false, childOrder: null, eventDate: null }, context);
+    expect(assessment).toEqual({ ok: false, reason: "That’s more than the 1 day you have left.", days: 2 });
+  });
+});

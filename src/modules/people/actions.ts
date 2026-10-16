@@ -100,6 +100,7 @@ export async function addPerson(_previous: ActionState, formData: FormData): Pro
         id: personId,
         profileId,
         fullName: input.fullName,
+        jobTitle: input.jobTitle,
         email: input.email,
         phone: input.phone,
         bankName: input.bankName,
@@ -174,6 +175,7 @@ export async function updatePerson(personId: string, _previous: ActionState, for
         .update(people)
         .set({
           fullName: input.fullName,
+          jobTitle: input.jobTitle,
           email: input.email,
           phone: input.phone,
           bankName: input.bankName ?? current.bankName,

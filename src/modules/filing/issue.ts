@@ -34,7 +34,8 @@ export async function makeSchedule(runId: string, actor: SessionUser): Promise<M
     const ruleRows = (await tx.select().from(rules)).map(toRuleRow);
     return { run, existing: Boolean(existing), snapshots, ruleRows };
   });
-  if (!data) return { status: "not_locked" };
+  // Imported months were filed before DashTeam; they have no IT-1(a) here.
+  if (!data || data.run.source !== "live") return { status: "not_locked" };
   if (data.existing) return { status: "already" };
 
   const month = monthOf(data.run.month);

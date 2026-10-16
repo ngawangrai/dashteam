@@ -1,4 +1,5 @@
 import "server-only";
+import { isImportedInputs } from "@/modules/documents/model";
 import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { claimsFor, type SessionUser } from "@/lib/auth/session";
 import { decryptField } from "@/lib/crypto/field";
@@ -144,13 +145,14 @@ export async function latestLockedMonth(user: SessionUser): Promise<PayrollMonth
 }
 
 /**
- * The locked months as a range, from the first month DashTeam paid to the end of the latest locked
+ * The locked months as a range, from the earliest locked month (imported or live) to the end of the latest locked
  * month, for checking leave before it's sent. Anyone signed in may ask (security-definer functions).
  */
 export async function lockedRange(user: SessionUser): Promise<LockedRange | null> {
   return asUser(claimsFor(user), async (tx) => {
+    // Months brought in from before DashTeam are locked too, so the range starts at the earliest.
     const rows = await tx.execute<{ first: string | null; latest: string | null }>(
-      sql`select public.payroll_first_month()::text as first, public.latest_locked_month()::text as latest`,
+      sql`select least(public.payroll_first_month(), public.earliest_locked_month())::text as first, public.latest_locked_month()::text as latest`,
     );
     const { first, latest } = rows[0] ?? { first: null, latest: null };
     if (!first || !latest) return null;
@@ -206,17 +208,18 @@ export async function lockedRun(user: SessionUser, month: PayrollMonth): Promise
     return {
       run,
       people: rows.map((row) => {
-        const inputs = row.inputs as SnapshotInputs;
+        // A month brought in from before DashTeam has its figures but no lines, leave or dates.
+        const inputs = isImportedInputs(row.inputs) ? null : (row.inputs as SnapshotInputs);
         const person = row.person as SnapshotPerson;
         return {
           personId: row.personId,
           fullName: row.fullName,
           employmentType: row.employmentType,
           result: row.result as PayResult,
-          lines: inputs.lines,
-          unpaidLeaveDays: inputs.unpaidLeaveDays,
-          startDate: inputs.startDate,
-          endDate: inputs.endDate,
+          lines: inputs?.lines ?? [],
+          unpaidLeaveDays: inputs?.unpaidLeaveDays ?? 0,
+          startDate: inputs?.startDate ?? "",
+          endDate: inputs?.endDate ?? null,
           bankName: person.bankName,
           bankAccountLast4: person.bankAccountLast4,
           deductions: row.grossCh - row.takeHomeCh,

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { resolveCompanyDetails } from "@/modules/rules/resolve";
 import type { RunPerson } from "@/modules/run/build";
 import { MIXED_LINES, OCTOBER, RULES, line, mixedTeam, nu, person, personIn, salary, snapshotOf } from "../../../tests/support/mixed-team";
-import { payslipModel, payslipReference } from "./model";
+import type { ImportRow } from "@/modules/import/payroll-csv";
+import { importedSnapshot } from "@/modules/import/snapshot";
+import { importedPayslipModel, payslipModel, payslipReference } from "./model";
 
 // A payslip prints what was locked, nothing else. These build the milestone 4 mixed team through the
 // real run calculation, turn each person into a snapshot exactly as lockPayroll stores it, and check
@@ -99,3 +101,44 @@ describe("who and what it's for", () => {
   });
 });
 
+
+describe("a payslip for an imported month", () => {
+  const given = (fields: Partial<ImportRow["figures"]>, employmentType: "full_time" | "intern" = "full_time"): ImportRow => ({
+    line: 2,
+    month: { year: 2025, month: 12 },
+    monthKey: "2025-12",
+    personId: "karma",
+    fullName: "Karma Wangchuk",
+    employmentType,
+    figures: { basic: 0, allowance: 0, stipend: 0, arrear: 0, otherEarnings: 0, gross: 0, pf: 0, gis: 0, tds: 0, hc: 0, otherDeductions: 0, takeHome: 0, ...fields },
+    given: {},
+  });
+  const imported = (row: ImportRow) => {
+    const { inputs, result } = importedSnapshot(row);
+    return importedPayslipModel({ month: row.month, fullName: row.fullName, employmentType: row.employmentType, person: { tpnLast4: "0042" }, inputs, result }, COMPANY, "XS-202512-001", "2026-10-07");
+  };
+
+  it("prints the figures exactly as given, marked as imported", () => {
+    const model = imported(
+      given({ basic: nu(50_000), allowance: nu(10_000), arrear: nu(5_000), otherEarnings: nu(2_000), gross: nu(67_000), pf: nu(100), tds: nu(6_331), hc: nu(670), otherDeductions: nu(3_000), takeHome: nu(56_899) }),
+    );
+    expect(model.imported).toBe(true);
+    expect(rows(model.earnings)).toEqual(["Basic 50000", "Allowances 10000", "Arrear 5000", "Other earnings 2000"]);
+    expect(rows(model.deductions)).toEqual(["Health contribution 670", "Provident fund 100", "TDS 6331", "Other deductions 3000"]);
+    expect(model.gross).toBe(nu(67_000));
+    expect(model.takeHome).toBe(nu(56_899));
+    expect(model.totalDeductions).toBe(model.deductions.reduce((sum, row) => sum + row.amount, 0));
+    expect(model.title).toBe("Payslip · December 2025");
+    expect(model.person.tpn).toBe("TPN ••••0042");
+  });
+
+  it("shows a stipend for an intern, and leaves out what's zero", () => {
+    const model = imported(given({ stipend: nu(20_000), gross: nu(20_000), hc: nu(200), takeHome: nu(19_800) }, "intern"));
+    expect(rows(model.earnings)).toEqual(["Stipend 20000"]);
+    expect(rows(model.deductions)).toEqual(["Health contribution 200", "TDS 0"]);
+  });
+
+  it("payslips DashTeam worked out aren't marked", () => {
+    expect(model("karma").imported).toBeUndefined();
+  });
+});

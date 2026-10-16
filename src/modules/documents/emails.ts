@@ -49,4 +49,13 @@ export function leaveDecidedEmail(input: {
   return compose(`Your ${name} wasn’t approved`, { lead: `Hi ${input.firstName}, your ${name} on ${span} was declined.`, paragraphs, link });
 }
 
+export function certificateEmail(input: { firstName: string; addressee: string; adminFirstName: string }): Email {
+  const to = input.addressee && input.addressee !== "To whom it may concern" ? `, addressed to ${input.addressee}` : "";
+  return compose("Your salary certificate is ready", {
+    lead: `Hi ${input.firstName}, your salary certificate is attached${to}.`,
+    paragraphs: ["It’s also in DashTeam under Payslips, whenever you need it again."],
+    footnote: `If anything on it looks wrong, let ${input.adminFirstName} know.`,
+  });
+}
+
 export type { Email };

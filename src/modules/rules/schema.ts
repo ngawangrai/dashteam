@@ -167,6 +167,15 @@ const filingSettings = z
   .refine((value) => new Set(value.reminder_days).size === value.reminder_days.length, "A reminder day is listed twice")
   .transform((value) => ({ reminderDays: [...value.reminder_days].sort((a, b) => a - b) }));
 
+const certificateSettings = z
+  .object({
+    signatory_name: z.string().trim().min(1, "Add who signs").max(80),
+    signatory_title: z.string().trim().min(1, "Add their title").max(80),
+    signature_id: z.uuid().nullable(),
+  })
+  .strict()
+  .transform((value) => ({ signatoryName: value.signatory_name, signatoryTitle: value.signatory_title, signatureId: value.signature_id }));
+
 const schemas = {
   tds,
   health_contribution: healthContribution,
@@ -183,6 +192,7 @@ const schemas = {
   payroll_settings: payrollSettings,
   company_details: companyDetails,
   filing_settings: filingSettings,
+  certificate_settings: certificateSettings,
 } satisfies { [K in RuleKey]: z.ZodType<RuleValues[K]> };
 
 export function parseRuleValue<K extends RuleKey>(key: K, value: unknown): RuleValues[K] {

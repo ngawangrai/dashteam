@@ -7,11 +7,12 @@ import type { z } from "zod";
 import { firstNameFrom } from "@/lib/auth/roles";
 import { claimsFor, requireRole, requireUser, type SessionUser } from "@/lib/auth/session";
 import { asUser, type Tx } from "@/lib/db/client";
-import { exitLeaveSettlements, leaveNotices, leaveRequests, payrollLines, people } from "@/lib/db/schema";
+import { exitLeaveSettlements, leaveNotices, leaveOpeningBalances, leaveRequests, payrollLines, people } from "@/lib/db/schema";
 import { addMonths, firstOfMonth, formatDate, formatDays, formatMonth, formatSpan, monthOf, thimphuToday } from "@/lib/format";
 import { currentTransactionId, labelNextWrites } from "@/modules/audit/labels";
 import { notifyLeave } from "@/modules/documents/issue";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
+import { LEAVE_TYPES } from "@/modules/rules/types";
 import { lockedMessage, lockedMonthsIn } from "@/modules/run/locked";
 import { lockedRange } from "@/modules/run/repository";
 import { assessRequest } from "./balance";
@@ -77,6 +78,7 @@ async function sendRequest(user: SessionUser, personId: string, formData: FormDa
         requests: context.requests,
         ruleRows: context.ruleRows,
         calendar: context.calendar,
+        opening: context.opening,
         locked: (await lockedRange(user)) ?? undefined,
       });
       if (!assessment.ok) return { error: assessment.reason };
@@ -261,6 +263,53 @@ export async function settleExitLeave(personId: string, _previous: LeaveActionSt
   } catch (error) {
     const locked = lockedMonthsIn(error);
     if (locked) return { status: "error", message: `${formatMonth(locked.locked, { withYear: true })} payroll is locked, so this can’t go into their final pay.` };
+    return { status: "error", message: SAVE_FAILED };
+  }
+}
+
+// ── Leave taken before DashTeam ──────────────────────────────────────────────────
+
+const OPENING_FIELD = /^opening:([0-9a-f-]{36}):([a-z_]+)$/;
+
+/** Saves everyone's opening leave at once, replacing what was there. Undo puts it back. */
+export async function saveOpeningLeave(_previous: LeaveActionState, formData: FormData): Promise<LeaveActionState> {
+  const admin = await requireRole("admin");
+  const year = Number(formData.get("year"));
+  const asOf = String(formData.get("asOf") ?? "");
+  if (!Number.isInteger(year) || !/^\d{4}-\d{2}-01$/.test(asOf) || Number(asOf.slice(0, 4)) !== year) return { status: "error", message: SAVE_FAILED };
+
+  const entries: { personId: string; leaveType: (typeof LEAVE_TYPES)[number]; days: number }[] = [];
+  const fieldErrors: Record<string, string> = {};
+  for (const [key, raw] of formData.entries()) {
+    const match = OPENING_FIELD.exec(key);
+    if (!match) continue;
+    const [, personId = "", leaveType = ""] = match;
+    if (!(LEAVE_TYPES as readonly string[]).includes(leaveType)) continue;
+    const text = String(raw).trim();
+    if (text === "") continue;
+    const days = Number(text);
+    if (!Number.isFinite(days) || days < 0 || days > 366 || !Number.isInteger(days * 2)) {
+      fieldErrors[key] = "Use whole or half days, like 3 or 2.5.";
+      continue;
+    }
+    if (days > 0) entries.push({ personId, leaveType: leaveType as (typeof LEAVE_TYPES)[number], days });
+  }
+  if (Object.keys(fieldErrors).length) return { status: "error", message: "Use whole or half days, like 3 or 2.5.", fieldErrors };
+
+  try {
+    const transactionId = await asUser(claimsFor(admin), async (tx) => {
+      await labelNextWrites(tx, "leave.opening_set");
+      await tx.delete(leaveOpeningBalances).where(eq(leaveOpeningBalances.leaveYear, year));
+      if (entries.length) {
+        await tx.insert(leaveOpeningBalances).values(entries.map((entry) => ({ ...entry, leaveYear: year, asOf, createdBy: admin.id })));
+      }
+      return currentTransactionId(tx);
+    });
+    revalidatePath("/admin", "layout");
+    revalidatePath("/leave");
+    return { status: "done", message: "Leave taken before DashTeam is saved. Balances include it now.", transactionId };
+  } catch (error) {
+    if (errorText(error).includes("fixed once a month is locked")) return { status: "error", message: "This is fixed now that a month is locked in DashTeam." };
     return { status: "error", message: SAVE_FAILED };
   }
 }

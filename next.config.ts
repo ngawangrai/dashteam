@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
   // Read from disk at runtime, so a standalone build must carry them: the payslip's fonts (and logo,
   // once added) and DRC's IT-1(a) template.
   outputFileTracingIncludes: { "/**": ["./src/modules/documents/fonts/**", "./src/modules/documents/assets/**", "./src/modules/filing/template/**"] },
+  // Uploads go through server actions: a filing receipt (5 MB), a payroll CSV (1 MB), a signature.
+  // The default 1 MB limit would turn a large receipt away before the app could say why.
+  experimental: { serverActions: { bodySizeLimit: "6mb" } },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

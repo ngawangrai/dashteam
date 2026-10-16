@@ -16,8 +16,13 @@ export const metadata = { title: "TDS filing" };
 
 function stateOf(row: FilingMonthView, today: string): { icon: LucideIcon; className: string; words: string } {
   if (row.state === "filed") {
-    return { icon: CircleCheck, className: "text-success", words: `Filed ${formatDate(row.filedOn ?? "")}${row.acknowledgementNumber ? ` · ${row.acknowledgementNumber}` : row.receipt ? " · receipt kept" : ""}` };
+    return {
+      icon: CircleCheck,
+      className: "text-success",
+      words: `Filed ${formatDate(row.filedOn ?? "")}${row.acknowledgementNumber ? ` · ${row.acknowledgementNumber}` : row.receipt ? " · receipt kept" : ""}${row.imported ? " · imported" : ""}`,
+    };
   }
+  if (row.dueDate === null) return { icon: CircleDashed, className: "text-label-secondary", words: "Imported, no filing recorded" };
   const status = dueStatus(today, row.dueDate);
   const due = status.kind === "upcoming" ? `due ${formatLongDate(row.dueDate).replace(/ \d{4}$/, "")}` : dueWords(status);
   if (status.kind === "overdue") return { icon: CircleAlert, className: "text-danger", words: `${row.state === "draft" ? "Not locked" : "Not filed"}, ${due}` };

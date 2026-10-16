@@ -115,7 +115,7 @@ export function PayslipSheet({ payslip, onClose, mode, personName }: PayslipShee
           </div>
           <PayslipBreakdown model={model} />
           <p className="text-caption text-label-secondary">
-            {model.reference} · Issued {model.issuedOn}
+            {model.imported ? `Imported record. Figures as kept before DashTeam. ${model.reference} · Brought in ${model.issuedOn}` : `${model.reference} · Issued ${model.issuedOn}`}
           </p>
           <div className="flex flex-col gap-2">
             <a

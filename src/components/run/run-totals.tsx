@@ -31,7 +31,11 @@ export function RunTotals({ totals, dueDate, locked = false }: { totals: Totals;
         ))}
       </dl>
       <p className="border-t border-separator/60 pt-3 text-body text-pretty">
-        {locked ? (
+        {!dueDate ? (
+          <>
+            <Money amount={totals.remit} className="font-semibold" /> was due to DRC for the month
+          </>
+        ) : locked ? (
           <>
             Pay <Money amount={totals.remit} className="font-semibold" /> to DRC by {formatLongDate(dueDate).replace(/ \d{4}$/, "")}
           </>

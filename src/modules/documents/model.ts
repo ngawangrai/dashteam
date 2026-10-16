@@ -18,6 +18,24 @@ export type PayslipSnapshot = {
   result: PayResult;
 };
 
+/** What an imported month's snapshot holds: the figures exactly as they were given, nothing worked out. */
+export type ImportedComponents = {
+  basic: Chhertum;
+  allowance: Chhertum;
+  stipend: Chhertum;
+  arrear: Chhertum;
+  otherEarnings: Chhertum;
+  otherDeductions: Chhertum;
+};
+export type ImportedInputs = { kind: "imported"; components: ImportedComponents; given: Record<string, string> };
+
+/** A snapshot from a month brought in from before DashTeam. Its result is the file's figures. */
+export type ImportedPayslipSnapshot = Omit<PayslipSnapshot, "inputs"> & { inputs: ImportedInputs };
+
+export function isImportedInputs(inputs: unknown): inputs is ImportedInputs {
+  return typeof inputs === "object" && inputs !== null && (inputs as { kind?: unknown }).kind === "imported";
+}
+
 export type PayslipRow = { label: string; detail?: string; amount: Chhertum };
 
 export type PayslipModel = {
@@ -36,6 +54,8 @@ export type PayslipModel = {
   issuedOn: string;
   /** Who to ask if something looks wrong: the admin who locked the month. Used in the email, not printed. */
   contact: string;
+  /** Brought in from records kept before DashTeam. Absent on payslips DashTeam worked out. */
+  imported?: true;
 };
 
 /** The company's mark on every payslip reference. A format, not a setting. */
@@ -101,5 +121,47 @@ export function payslipModel(snapshot: PayslipSnapshot, company: CompanyDetails,
     reference,
     issuedOn: formatLongDate(issuedOn),
     contact,
+  };
+}
+
+/**
+ * A payslip for a month brought in from before DashTeam: the figures exactly as given, in the same
+ * layout, marked as imported. Rows that are zero are left out, as on any payslip.
+ */
+export function importedPayslipModel(snapshot: ImportedPayslipSnapshot, company: CompanyDetails, reference: string, issuedOn: string, contact = "your admin"): PayslipModel {
+  const { result } = snapshot;
+  const parts = snapshot.inputs.components;
+  const row = (label: string, amount: Chhertum): PayslipRow[] => (amount ? [{ label, amount }] : []);
+  const earnings: PayslipRow[] =
+    snapshot.employmentType === "intern"
+      ? [{ label: "Stipend", amount: parts.stipend }]
+      : [{ label: "Basic", amount: parts.basic }, ...row("Allowances", parts.allowance)];
+  earnings.push(...row("Arrear", parts.arrear), ...row("Other earnings", parts.otherEarnings));
+  const deductions: PayslipRow[] = [
+    { label: "Health contribution", amount: result.healthContribution },
+    ...row("Provident fund", result.providentFund),
+    ...row("GIS", result.gis),
+    { label: "TDS", amount: result.tds },
+    ...row("Other deductions", parts.otherDeductions),
+  ];
+  const monthName = formatMonth(snapshot.month, { withYear: true });
+  return {
+    company: { name: company.name, addressLines: company.addressLines, showLogo: company.showLogo },
+    title: `Payslip · ${monthName}`,
+    monthName,
+    person: {
+      name: snapshot.fullName,
+      employmentType: EMPLOYMENT_TYPE_LABEL[snapshot.employmentType],
+      tpn: snapshot.person.tpnLast4 ? `TPN ••••${snapshot.person.tpnLast4}` : "TPN not on file",
+    },
+    takeHome: result.takeHome,
+    earnings,
+    gross: result.gross,
+    deductions,
+    totalDeductions: result.gross - result.takeHome,
+    reference,
+    issuedOn: formatLongDate(issuedOn),
+    contact,
+    imported: true,
   };
 }

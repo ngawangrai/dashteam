@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { claimsFor, type SessionUser } from "@/lib/auth/session";
 import { asUser } from "@/lib/db/client";
-import { emailDeliveries, leaveRequests, payrollRuns, payrollSnapshots, payslips, people, rules } from "@/lib/db/schema";
+import { emailDeliveries, leaveRequests, payrollRuns, payrollSnapshots, payslips, people, rules, salaryCertificates } from "@/lib/db/schema";
 import { sendEmail } from "@/lib/email";
 import { serverEnv } from "@/lib/env/server";
 import { firstNameFrom } from "@/lib/auth/roles";
@@ -13,8 +13,9 @@ import { calendarFrom, loadLeaveContext } from "@/modules/leave/repository";
 import { labelNextWrites } from "@/modules/audit/labels";
 import { resolveCompanyDetails } from "@/modules/rules/resolve";
 import { toRuleRow } from "@/modules/rules/rows";
-import { leaveDecidedEmail, leaveRequestedEmail, payslipEmail, type Email } from "./emails";
-import { type PayslipModel, type PayslipSnapshot, payslipModel, payslipReference } from "./model";
+import type { CertificateModel } from "./certificate-model";
+import { certificateEmail, leaveDecidedEmail, leaveRequestedEmail, payslipEmail, type Email } from "./emails";
+import { type PayslipModel, type PayslipSnapshot, importedPayslipModel, isImportedInputs, payslipModel, payslipReference } from "./model";
 import { renderPayslip } from "./render";
 
 // After a month is locked: make each payslip once, queue its email once, and send. Every step only
@@ -39,22 +40,25 @@ export async function generatePayslips(runId: string, actor: Actor): Promise<str
   if (!data) return [];
   const { run, snapshots, issued, ruleRows } = data;
   const month = monthOf(run.month);
-  const company = resolveCompanyDetails(ruleRows, month);
   const issuedOn = thimphuToday(run.lockedAt ?? new Date());
+  // An imported month is made into payslips now, so it carries the letterhead in force now.
+  const company = resolveCompanyDetails(ruleRows, run.source === "imported" ? monthOf(issuedOn) : month);
 
   // Rendering happens outside any transaction; each insert is its own, and a payslip that already
   // exists (another run got there first) is left alone.
   for (const [index, snapshot] of snapshots.entries()) {
     if (issued.has(snapshot.id)) continue;
-    const source: PayslipSnapshot = {
+    const common = {
       month,
       fullName: snapshot.fullName,
       employmentType: snapshot.employmentType,
       person: { tpnLast4: (snapshot.person as { tpnLast4: string | null }).tpnLast4 },
-      inputs: snapshot.inputs as PayslipSnapshot["inputs"],
       result: snapshot.result as PayslipSnapshot["result"],
     };
-    const model = payslipModel(source, company, payslipReference(month, index + 1), issuedOn, actor.firstName);
+    const reference = payslipReference(month, index + 1);
+    const model = isImportedInputs(snapshot.inputs)
+      ? importedPayslipModel({ ...common, inputs: snapshot.inputs }, company, reference, issuedOn, actor.firstName)
+      : payslipModel({ ...common, inputs: snapshot.inputs as PayslipSnapshot["inputs"] }, company, reference, issuedOn, actor.firstName);
     const { pdf, sha256 } = await renderPayslip(model);
     await asUser(claimsFor(actor), async (tx) => {
       await labelNextWrites(tx, "payslip.generated");
@@ -91,6 +95,9 @@ export async function queuePayslipEmail(payslipId: string, kind: "payslip" | "pa
 /** Everything that happens after a lock: payslips, then their emails. Safe to run again. */
 export async function issuePayslips(runId: string, actor: Actor, options: { retryFailed?: boolean } = {}): Promise<void> {
   const ids = await generatePayslips(runId, actor);
+  // Months brought in from before DashTeam were paid long ago: their payslips are never emailed.
+  const [run] = await asUser(claimsFor(actor), (tx) => tx.select({ source: payrollRuns.source }).from(payrollRuns).where(eq(payrollRuns.id, runId)).limit(1));
+  if (run?.source !== "live") return;
   for (const id of ids) await queuePayslipEmail(id, "payslip", actor);
   if (options.retryFailed) await readdressFailed(ids, actor);
   const due = await asUser(claimsFor(actor), (tx) =>
@@ -171,6 +178,20 @@ async function composePayslipEmail(delivery: typeof emailDeliveries.$inferSelect
   return { email, attachments: [{ filename: `Payslip ${model.monthName}.pdf`, content: slip.pdf, contentType: "application/pdf" }] };
 }
 
+/** A certificate's email, or null if Undo took the certificate back (it's then skipped). */
+async function composeCertificateEmail(delivery: typeof emailDeliveries.$inferSelect, actor: Actor) {
+  if (!delivery.certificateId) return null;
+  const [row] = await asUser(claimsFor(actor), (tx) =>
+    tx.select({ content: salaryCertificates.content, pdf: salaryCertificates.pdf }).from(salaryCertificates).where(eq(salaryCertificates.id, delivery.certificateId ?? "")).limit(1),
+  );
+  if (!row) return null;
+  const model = row.content as CertificateModel;
+  return {
+    email: certificateEmail({ firstName: firstNameFrom(model.person.name, ""), addressee: model.addressee.join(", "), adminFirstName: actor.firstName }),
+    attachments: [{ filename: `Salary certificate ${model.reference}.pdf`, content: row.pdf, contentType: "application/pdf" }],
+  };
+}
+
 async function composeLeaveEmail(delivery: typeof emailDeliveries.$inferSelect, actor: Actor): Promise<{ email: Email } | { skip: true }> {
   const [row] = await asUser(claimsFor(actor), (tx) =>
     tx
@@ -229,7 +250,15 @@ export async function sendDeliveries(deliveryIds: string[], actor: Actor): Promi
 
     let outcome: Outcome;
     try {
-      if (claimed.kind === "leave_requested" || claimed.kind === "leave_decided") {
+      if (claimed.kind === "certificate_issued") {
+        const composed = await composeCertificateEmail(claimed, actor);
+        if (!composed) outcome = { status: "skipped" };
+        else {
+          const sent = await sendEmail({ to: claimed.toEmail, ...composed.email, attachments: composed.attachments, idempotencyKey: claimed.id });
+          outcome = sent.ok ? { status: "sent" } : { status: "failed", error: sent.error };
+          if (sent.ok) await finish(id, "sent", actor, sent.providerId);
+        }
+      } else if (claimed.kind === "leave_requested" || claimed.kind === "leave_decided") {
         const composed = await composeLeaveEmail(claimed, actor);
         if ("skip" in composed) outcome = { status: "skipped" };
         else {

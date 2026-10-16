@@ -39,7 +39,15 @@ export type AuditAction =
   | "filing.marked_filed"
   | "filing.edited"
   | "filing.receipt_added"
-  | "filing.entry_ticked";
+  | "filing.entry_ticked"
+  | "payroll.imported"
+  | "leave.opening_set"
+  | "statement.generated"
+  | "certificate.requested"
+  | "certificate.withdrawn"
+  | "certificate.issued"
+  | "certificate.declined"
+  | "certificate_settings.set";
 
 export async function labelNextWrites(tx: Tx, action: AuditAction): Promise<void> {
   await tx.execute(sql`select set_config('dashteam.action', ${action}, true)`);

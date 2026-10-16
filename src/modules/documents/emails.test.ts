@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaveDecidedEmail, leaveRequestedEmail, payslipEmail } from "./emails";
+import { certificateEmail, leaveDecidedEmail, leaveRequestedEmail, payslipEmail } from "./emails";
 
 // Emails read like a helpful person wrote them: short, specific, no em dashes, no exclamation marks.
 
@@ -9,7 +9,19 @@ const all = [
   leaveRequestedEmail({ personName: "Sonam Wangmo", leaveType: "annual", days: 3, startDate: "2026-10-07", endDate: "2026-10-09", note: "Family visit", url: "https://dashteam.example/admin" }),
   leaveDecidedEmail({ firstName: "Sonam", decision: "approved", leaveType: "annual", days: 3, startDate: "2026-10-07", endDate: "2026-10-09", note: "", adminFirstName: "Tashi", url: "https://dashteam.example/leave" }),
   leaveDecidedEmail({ firstName: "Sonam", decision: "declined", leaveType: "unpaid", days: 1, startDate: "2026-10-07", endDate: "2026-10-07", note: "Busy week", adminFirstName: "Tashi", url: "https://dashteam.example/leave" }),
+  certificateEmail({ firstName: "Sonam", addressee: "Bank of Bhutan, Thimphu", adminFirstName: "Tashi" }),
+  certificateEmail({ firstName: "Sonam", addressee: "To whom it may concern", adminFirstName: "Tashi" }),
 ];
+
+describe("the certificate email", () => {
+  it("says it's attached, who it's addressed to, and where to find it again", () => {
+    const [addressed, general] = all.slice(5);
+    expect(addressed?.subject).toBe("Your salary certificate is ready");
+    expect(addressed?.text).toContain("Hi Sonam, your salary certificate is attached, addressed to Bank of Bhutan, Thimphu.");
+    expect(addressed?.text).toContain("under Payslips");
+    expect(general?.text).toContain("Hi Sonam, your salary certificate is attached.");
+  });
+});
 
 describe("the payslip email", () => {
   it("says what's attached and the take-home, and who to ask", () => {

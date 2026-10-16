@@ -5,6 +5,7 @@ import { LinkRow } from "@/components/link-row";
 import { MaskedValue } from "@/components/masked-value";
 import { Money } from "@/components/money";
 import { Page } from "@/components/page";
+import { AdminDocumentsSection } from "@/components/documents/admin-documents-section";
 import { PayslipList } from "@/components/documents/payslip-list";
 import { PayRows } from "@/components/people/pay-rows";
 import { RequestCard } from "@/components/people/request-card";
@@ -18,7 +19,9 @@ import { lockedRange } from "@/modules/run/repository";
 import { enterLeaveFor } from "@/modules/leave/actions";
 import { balancesFor, exitLeaveFor, loadLeaveContext, sheetContextFor } from "@/modules/leave/repository";
 import { formatDate, formatMonth, formatPhone, monthOf, thimphuToday } from "@/lib/format";
+import { certificateStateFor } from "@/modules/documents/certificates";
 import { payslipsFor } from "@/modules/documents/repository";
+import { statementMonthsFor } from "@/modules/documents/statements";
 import { takeHomeFor } from "@/modules/people/estimate";
 import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
 import { getPersonDetail, rulesForMonth } from "@/modules/people/repository";
@@ -35,7 +38,14 @@ export default async function PersonPage({ params }: Params) {
   if (!detail) notFound();
 
   const { person, current, upcoming, pendingRequest } = detail;
-  const [rules, leave, exit, payslips] = await Promise.all([rulesForMonth(user), loadLeaveContext(user, person.id), exitLeaveFor(user, person.id), payslipsFor(user, person.id)]);
+  const [rules, leave, exit, payslips, months, certificates] = await Promise.all([
+    rulesForMonth(user),
+    loadLeaveContext(user, person.id),
+    exitLeaveFor(user, person.id),
+    payslipsFor(user, person.id),
+    statementMonthsFor(user, person.id),
+    certificateStateFor(user, person.id),
+  ]);
   const today = thimphuToday();
   const sheet = leave ? sheetContextFor(leave, await lockedRange(user)) : null;
   const firstName = firstNameFrom(person.fullName, person.email);
@@ -43,7 +53,7 @@ export default async function PersonPage({ params }: Params) {
   const takeHome = current && rules ? takeHomeFor(current, rules) : null;
   const type = (current ?? upcoming)?.employmentType;
   const subtitle = person.isCurrent
-    ? [type ? EMPLOYMENT_TYPE_LABEL[type] : null, `since ${formatDate(person.startDate)}`].filter(Boolean).join(" · ")
+    ? [person.jobTitle, type ? EMPLOYMENT_TYPE_LABEL[type] : null, `since ${formatDate(person.startDate)}`].filter(Boolean).join(" · ")
     : `Left on ${formatDate(person.endDate ?? "")}`;
 
   return (
@@ -115,6 +125,8 @@ export default async function PersonPage({ params }: Params) {
       ) : null}
 
       {payslips.length ? <PayslipList payslips={payslips} mode="admin" personName={person.fullName} title="Payslips" /> : null}
+
+      <AdminDocumentsSection personId={person.id} personName={person.fullName} months={months} certificates={certificates.requests} />
 
       <InsetSection title="Bank and tax">
         <InsetRow label="Bank">{person.bankName ?? "Not added"}</InsetRow>

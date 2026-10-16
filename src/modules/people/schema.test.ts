@@ -15,6 +15,7 @@ describe("person details", () => {
   it("tidies what people type", () => {
     expect(personDetailsSchema.parse(details)).toEqual({
       fullName: "Sonam Wangmo",
+      jobTitle: null,
       email: "sonam@xceed.studio",
       phone: "17112233",
       bankName: "Bank of Bhutan",

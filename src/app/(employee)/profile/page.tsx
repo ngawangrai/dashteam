@@ -1,4 +1,5 @@
 import { InsetRow, InsetSection } from "@/components/inset-section";
+import { LinkRow } from "@/components/link-row";
 import { MaskedValue } from "@/components/masked-value";
 import { Page } from "@/components/page";
 import { PayRows } from "@/components/people/pay-rows";
@@ -10,6 +11,14 @@ import { EMPLOYMENT_TYPE_LABEL } from "@/modules/people/labels";
 import { getOwnProfile } from "@/modules/people/repository";
 
 export const metadata = { title: "Profile" };
+
+function AdminSettings() {
+  return (
+    <InsetSection title="Settings">
+      <LinkRow href="/admin/settings/certificates" title="Salary certificates" detail="Who signs them" />
+    </InsetSection>
+  );
+}
 
 export default async function ProfilePage() {
   const user = await requireUser();
@@ -24,6 +33,7 @@ export default async function ProfilePage() {
             <span className="break-all">{user.email}</span>
           </InsetRow>
         </InsetSection>
+        {user.role === "admin" ? <AdminSettings /> : null}
         <div className="flex justify-center md:hidden">
           <SignOutButton />
         </div>
@@ -37,7 +47,7 @@ export default async function ProfilePage() {
   return (
     <Page
       title={person.fullName}
-      subtitle={[current ? EMPLOYMENT_TYPE_LABEL[current.employmentType] : null, `since ${formatDate(person.startDate)}`]
+      subtitle={[person.jobTitle, current ? EMPLOYMENT_TYPE_LABEL[current.employmentType] : null, `since ${formatDate(person.startDate)}`]
         .filter(Boolean)
         .join(" · ")}
     >
@@ -86,6 +96,8 @@ export default async function ProfilePage() {
       {pending ? null : (
         <RequestChange current={{ phone: person.phone, bankName: person.bankName, bankAccountLast4: person.bankAccountLast4 }} />
       )}
+
+      {user.role === "admin" ? <AdminSettings /> : null}
 
       <div className="flex justify-center md:hidden">
         <SignOutButton />

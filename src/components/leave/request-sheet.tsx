@@ -9,7 +9,7 @@ import { Sheet } from "@/components/sheet";
 import { confirmWithUndo } from "@/components/undo-toast";
 import { formatDays, formatSpan } from "@/lib/format";
 import type { LeaveActionState } from "@/modules/leave/actions";
-import { type Employment, type LeaveRequestFacts, type LockedRange, assessRequest } from "@/modules/leave/balance";
+import { type Employment, type LeaveRequestFacts, type LockedRange, type OpeningLeave, assessRequest } from "@/modules/leave/balance";
 import type { LeaveCalendar } from "@/modules/leave/days";
 import { LEAVE_TYPE_NAME } from "@/modules/leave/labels";
 import { type ChildOrder, type EmploymentType, LEAVE_TYPES, type LeavePolicy, type LeaveType, type RuleRow } from "@/modules/rules/types";
@@ -21,6 +21,8 @@ export type LeaveSheetContext = {
   requests: LeaveRequestFacts[];
   ruleRows: RuleRow[];
   calendar: LeaveCalendar;
+  /** Leave taken before DashTeam started, counted as used. */
+  opening: OpeningLeave[];
   /** What this person can take today, in display order. */
   policy: LeavePolicy;
   today: string;
@@ -91,6 +93,7 @@ export function RequestLeaveSheet({ context, action, forName, triggerLabel = "Re
             requests: context.requests,
             ruleRows: context.ruleRows,
             calendar: context.calendar,
+            opening: context.opening,
             locked: context.locked,
           },
         )

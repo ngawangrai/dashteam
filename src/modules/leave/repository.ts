@@ -2,14 +2,14 @@ import "server-only";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
 import { claimsFor, type SessionUser } from "@/lib/auth/session";
 import { asUser } from "@/lib/db/client";
-import { type Holiday as HolidayRow, exitLeaveSettlements, holidays, leaveNotices, leaveRequests, payRecords, people } from "@/lib/db/schema";
+import { type Holiday as HolidayRow, exitLeaveSettlements, holidays, leaveNotices, leaveOpeningBalances, leaveRequests, payRecords, people } from "@/lib/db/schema";
 import { monthOf, thimphuToday } from "@/lib/format";
 import { monthlyPayOf, payInForce } from "@/modules/people/pay";
 import { toPayView } from "@/modules/people/repository";
 import { loadRuleRows } from "@/modules/rules/repository";
 import { resolveLeaveRules } from "@/modules/rules/resolve";
 import { type EmploymentType, LEAVE_TYPES, type LeaveType, type RuleRow } from "@/modules/rules/types";
-import { type Balance, type Employment, type LeaveRequestFacts, type LockedRange, balanceFor } from "./balance";
+import { type Balance, type Employment, type LeaveRequestFacts, type LockedRange, type OpeningLeave, balanceFor } from "./balance";
 import { type LeaveCalendar, countLeaveDays } from "./days";
 import { type ExitSettlement, exitSettlement } from "./exit";
 import { type Holiday, type ImpactRequest, expandHolidays, holidayLabel, holidaysByDate, tentativeDates } from "./holidays";
@@ -36,6 +36,8 @@ export type LeaveContext = {
   requests: LeaveRequestView[];
   ruleRows: RuleRow[];
   calendar: LeaveCalendar;
+  /** Leave taken before DashTeam started, counted as used. */
+  opening: OpeningLeave[];
 };
 
 type RequestRow = typeof leaveRequests.$inferSelect;
@@ -92,6 +94,10 @@ export async function loadLeaveContext(user: SessionUser, personId: string): Pro
     const allHolidays = (await tx.select().from(holidays).orderBy(asc(holidays.startDate))).map(toHoliday);
     const calendar = calendarFrom(allHolidays, employmentType ? workingWeekNow(ruleRows, employmentType) : [1, 2, 3, 4, 5]);
     const rows = await tx.select().from(leaveRequests).where(eq(leaveRequests.personId, personId)).orderBy(asc(leaveRequests.startDate));
+    const opening = await tx
+      .select({ leaveType: leaveOpeningBalances.leaveType, year: leaveOpeningBalances.leaveYear, days: leaveOpeningBalances.days })
+      .from(leaveOpeningBalances)
+      .where(eq(leaveOpeningBalances.personId, personId));
     return {
       personId,
       person: { startDate: person.startDate, endDate: person.endDate },
@@ -99,6 +105,7 @@ export async function loadLeaveContext(user: SessionUser, personId: string): Pro
       requests: rows.map((row) => toView(row, calendar, ruleRows, employmentType)),
       ruleRows,
       calendar,
+      opening: opening.map((o) => ({ ...o, days: Number(o.days) })),
     };
   });
 }
@@ -119,6 +126,7 @@ export function balancesFor(context: LeaveContext, year: number): BalanceLine[] 
       requests: context.requests,
       ruleRows: context.ruleRows,
       calendar: context.calendar,
+      opening: context.opening,
     }),
   })).filter((line) => line.balance.kind !== "notOffered");
 }
@@ -157,6 +165,7 @@ export async function pendingLeaveRequests(user: SessionUser): Promise<PendingLe
               ruleRows: context.ruleRows,
               calendar: context.calendar,
               childOrder: request.childOrder,
+              opening: context.opening,
             });
             if (balance.kind === "pool") leftAfter = balance.left;
             if (balance.kind === "perEvent") leftAfter = balance.allowance - request.days;
@@ -327,7 +336,8 @@ export async function pendingCount(user: SessionUser): Promise<number> {
   return asUser(claimsFor(user), async (tx) => {
     const [row] = await tx.execute<{ count: number }>(sql`
       select (select count(*) from public.leave_requests where status = 'pending')
-           + (select count(*) from public.profile_change_requests where status = 'pending') as count`);
+           + (select count(*) from public.profile_change_requests where status = 'pending')
+           + (select count(*) from public.certificate_requests where status = 'pending') as count`);
     return Number(row?.count ?? 0);
   });
 }
@@ -420,6 +430,7 @@ export function sheetContextFor(context: LeaveContext, locked: LockedRange | nul
     })),
     ruleRows: context.ruleRows,
     calendar: context.calendar,
+    opening: context.opening,
     policy,
     today,
     locked: locked ?? undefined,

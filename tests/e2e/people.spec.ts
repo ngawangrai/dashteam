@@ -126,6 +126,8 @@ test("a pay change dated next month leaves this month's pay unchanged", async ({
   await signIn(page, ADMIN);
   await expect(page).toHaveURL(/\/admin$/);
   await page.goto(`/admin/people/${fullTime.id}/pay`);
+  // Typing before hydration sets the field but not the form's state, so the estimate never updates.
+  await page.waitForLoadState("networkidle");
   await page.getByLabel("Basic pay (Nu.)").fill("44,000");
   await expect(page.getByText(/now Nu\./)).toBeVisible();
   await page.getByRole("button", { name: `Change pay from ${month}` }).click();

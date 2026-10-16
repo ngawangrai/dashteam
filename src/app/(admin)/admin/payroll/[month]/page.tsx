@@ -35,21 +35,25 @@ export default async function PayrollMonthPage({ params }: Params) {
   const locked = await lockedRun(user, month);
   if (locked) {
     const { run, people } = locked;
+    const imported = run.source === "imported";
     const deliveries = await deliveryStatus(user, run.id);
+    const payslips = Object.fromEntries(deliveries.flatMap((row) => (row.payslip ? [[row.personId, row.payslip]] : [])));
     return (
       <Page
         title={title}
-        subtitle={`Locked on ${formatDate(thimphuToday(run.lockedAt ?? new Date()))}`}
+        subtitle={imported ? `Imported on ${formatDate(thimphuToday(run.lockedAt ?? new Date()))} from records kept before DashTeam` : `Locked on ${formatDate(thimphuToday(run.lockedAt ?? new Date()))}`}
         back={back}
         action={
-          <a
-            href={`/admin/payroll/${key}/bank-list`}
-            download
-            className="pressable inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-accent-fill px-4 text-body font-semibold text-on-accent"
-          >
-            <Icon icon={Download} size={20} />
-            Download bank list
-          </a>
+          imported ? undefined : (
+            <a
+              href={`/admin/payroll/${key}/bank-list`}
+              download
+              className="pressable inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-accent-fill px-4 text-body font-semibold text-on-accent"
+            >
+              <Icon icon={Download} size={20} />
+              Download bank list
+            </a>
+          )
         }
       >
         <RunTotals
@@ -66,24 +70,24 @@ export default async function PayrollMonthPage({ params }: Params) {
           }}
         />
         <InsetSection>
-          <LinkRow href={`/admin/payroll/${key}/filing`} title="File with DRC" detail="The IT-1(a), and the record once it’s filed" />
+          {imported ? (
+            <LinkRow href={`/admin/payroll/${key}/filing`} title="Filing record" detail="When it was filed with DRC, for your records" />
+          ) : (
+            <LinkRow href={`/admin/payroll/${key}/filing`} title="File with DRC" detail="The IT-1(a), and the record once it’s filed" />
+          )}
         </InsetSection>
-        {people.length ? <DeliveryList runId={run.id} rows={deliveries} /> : null}
+        {people.length && !imported ? <DeliveryList runId={run.id} rows={deliveries} /> : null}
         {people.length ? (
-          <LockedReview
-            people={people}
-            totals={{ gross: run.grossCh ?? 0, takeHome: run.takeHomeCh ?? 0 }}
-            monthName={name}
-            payslips={Object.fromEntries(deliveries.flatMap((row) => (row.payslip ? [[row.personId, row.payslip]] : [])))}
-          />
+          <LockedReview people={people} totals={{ gross: run.grossCh ?? 0, takeHome: run.takeHomeCh ?? 0 }} monthName={name} payslips={payslips} />
         ) : (
           <InsetSection>
             <EmptyState icon={Users} title={`No one was paid in ${name}`} message="It was locked with no one employed that month." />
           </InsetSection>
         )}
         <p className="px-4 text-caption text-pretty text-label-secondary">
-          {name} is locked, so nothing in it can change. A correction goes on a later month as a one-off. The bank list shows account numbers in full,
-          so each download is recorded.
+          {imported
+            ? `${name} was brought in exactly as it was paid, so nothing in it can change. Its payslips are marked as imported, and nobody was emailed.`
+            : `${name} is locked, so nothing in it can change. A correction goes on a later month as a one-off. The bank list shows account numbers in full, so each download is recorded.`}
         </p>
       </Page>
     );
@@ -98,9 +102,14 @@ export default async function PayrollMonthPage({ params }: Params) {
           <EmptyState
             icon={Users}
             title={`DashTeam pays from ${formatMonth(overview.firstMonth, { withYear: true })}`}
-            message={`${name} was paid another way, so there’s nothing for it here.`}
+            message={`${name} was paid another way. You can bring it in from your old records.`}
           />
         </InsetSection>
+        <div className="flex justify-center">
+          <ButtonLink href="/admin/payroll/import" variant="plain">
+            Bring in past months
+          </ButtonLink>
+        </div>
       </Page>
     );
   }

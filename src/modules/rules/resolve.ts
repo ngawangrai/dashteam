@@ -8,6 +8,7 @@ import {
   type PayrollRuleValues,
   type PayrollSettings,
   type CompanyDetails,
+  type CertificateSettings,
   type FilingSettings,
   type SettingsRuleKey,
   type SettingsRuleValues,
@@ -117,4 +118,15 @@ export function resolveCompanyDetails(rows: readonly RuleRow[], month: PayrollMo
 /** When TDS filing reminders go out, as in force for a month. */
 export function resolveFilingSettings(rows: readonly RuleRow[], month: PayrollMonth): FilingSettings {
   return companyWide(rows, "filing_settings", month);
+}
+
+/** Who signs salary certificates this month, or null until someone is set. */
+export function resolveCertificateSettings(rows: readonly RuleRow[], month: PayrollMonth): CertificateSettings | null {
+  if (!rows.some((row) => row.key === "certificate_settings")) return null;
+  try {
+    return companyWide(rows, "certificate_settings", month);
+  } catch {
+    // Set from a later month only: nobody signs yet this month.
+    return null;
+  }
 }

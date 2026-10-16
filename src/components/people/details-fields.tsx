@@ -7,6 +7,7 @@ import { BANKS } from "@/modules/people/banks";
 
 export type DetailsValues = {
   fullName: string;
+  jobTitle: string;
   email: string;
   phone: string;
   startDate: string;
@@ -34,6 +35,16 @@ export function DetailsFields({ values, onChange, errors = {}, stored }: Details
       <InsetSection title="Details">
         <div className="flex flex-col gap-4 p-4">
           <TextField name="fullName" label="Full name" autoComplete="off" value={values.fullName} onChange={(e) => set({ fullName: e.target.value })} error={errors.fullName} required />
+          <TextField
+            name="jobTitle"
+            label="Job title"
+            autoComplete="off"
+            placeholder="For example, Product Designer"
+            value={values.jobTitle}
+            onChange={(e) => set({ jobTitle: e.target.value })}
+            error={errors.jobTitle}
+            hint="It goes on their salary certificate."
+          />
           <TextField
             name="email"
             label="Email"

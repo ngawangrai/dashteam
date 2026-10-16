@@ -38,7 +38,10 @@ export function PayslipList({ payslips, mode, personName, initiallyOpen, title }
             {group.items.map((payslip) => (
               <li key={payslip.id} className="border-b border-separator/60 last:border-b-0">
                 <button type="button" onClick={() => setOpenId(payslip.id)} className="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left active:bg-fill">
-                  <span className="flex-1 text-body">{formatMonth(payslip.month, { withYear: group.withYear })}</span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-body">{formatMonth(payslip.month, { withYear: group.withYear })}</span>
+                    {payslip.content.imported ? <span className="text-secondary text-label-secondary">Imported</span> : null}
+                  </span>
                   <Money amount={payslip.takeHome} className="text-body" />
                   <Icon icon={ChevronRight} size={18} className="shrink-0 text-label-secondary" />
                 </button>

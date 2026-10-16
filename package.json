@@ -21,7 +21,8 @@
     "db:reset": "supabase db reset",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "supabase migration up",
-    "env:local": "node scripts/local-env.mjs"
+    "env:local": "node scripts/local-env.mjs",
+    "demo": "supabase db reset && playwright test --config playwright.demo.config.ts"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.9.0",

@@ -23,6 +23,7 @@ export function AddPersonForm({ rules, today }: { rules: RulesByType | null; tod
   }, { status: "idle" });
   const [details, setDetails] = useState<DetailsValues>({
     fullName: "",
+    jobTitle: "",
     email: "",
     phone: "",
     startDate: today,

@@ -21,6 +21,7 @@ export default async function EditPersonPage({ params }: { params: Promise<{ id:
         personId={person.id}
         initial={{
           fullName: person.fullName,
+          jobTitle: person.jobTitle ?? "",
           email: person.email,
           phone: person.phone ? formatPhone(person.phone) : "",
           startDate: person.startDate,

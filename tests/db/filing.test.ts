@@ -60,7 +60,7 @@ describe("the schedule and receipts never change", () => {
         const [run] = await tx<{ id: string }[]>`insert into public.payroll_runs (month) values ('2030-03-01') returning id`;
         await tx`insert into public.it1a_schedules (run_id, month, rows, totals, xls, xls_sha256) values (${run?.id ?? ""}, '2030-03-01', '[]', '{}', '\\x00'::bytea, 'abc')`;
       }),
-    ).rejects.toThrow(/only for a locked month/);
+    ).rejects.toThrow(/only for a month locked in DashTeam/);
   });
 
   it("stays exactly as made when the person, their pay or the rules change", async () => {
