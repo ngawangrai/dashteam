@@ -2,11 +2,20 @@
 
 `backup.sh` runs nightly from `.github/workflows/backup.yml` at 02:00 Thimphu time.
 
-1. `pg_dump` (custom format) of the production `public` and `auth` schemas, through the Supabase session pooler
-2. Streamed straight into `age`, encrypted to a public key. GitHub never holds the key that decrypts it
-3. Uploaded with a `.sha256` checksum to the private R2 bucket: `daily/` (kept 35 days by a lifecycle rule) and, on the 1st, `monthly/` (kept for good)
+1. Checks its settings and that the production database answers (a paused project is named as such)
+2. `pg_dump` (custom format) of the production `public` and `auth` schemas, through the Supabase session pooler
+3. Streamed straight into `age`, encrypted to a public key. GitHub never holds the key that decrypts it.
+   On the way past, `pg_restore --list` reads the dump's table of contents (names only, no data); the run
+   stops if there is no data for `payroll_snapshots`, `audit_log`, `people` or `auth.users`
+4. Uploaded with a `.sha256` checksum to the private R2 bucket: `daily/` (kept 35 days by a lifecycle rule) and, on the 1st, `monthly/` (kept for good)
+5. Downloaded again from R2 and checked: the checksum in R2 must be the one made before upload, the file must
+   match it, and it must be an age file. Anything else fails the run
 
-A failed run emails the repository's watchers through GitHub's standard workflow-failure notification.
+Decrypting needs the private key, which never comes to GitHub, so a nightly run can't prove that part.
+The restore drill does.
+
+A failed run emails `ALERT_EMAIL_TO` with the reason and a link to the run (settings in the main README).
+GitHub's own workflow-failure email is the fallback.
 
 ## Restoring
 

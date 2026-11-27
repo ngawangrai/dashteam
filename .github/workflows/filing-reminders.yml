@@ -16,16 +16,26 @@ jobs:
   remind:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Check required settings
+        run: scripts/ci/require-secrets.sh "Settings → Secrets and variables → Actions → Repository secrets" APP_URL CRON_SECRET
       - name: Ask DashTeam to send today's reminder
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::error::Set the APP_URL and CRON_SECRET repository secrets first."
+          if ! reply="$(curl --fail-with-body --silent --show-error --max-time 60 \
+            -X POST "$APP_URL/api/cron/filing-reminders" \
+            -H "Authorization: Bearer $CRON_SECRET" 2>&1)"; then
+            echo "DashTeam didn't take the reminder request: $reply" | tee -a "$RUNNER_TEMP/alert.txt"
             exit 1
           fi
-          curl --fail-with-body --silent --show-error --max-time 60 \
-            -X POST "$APP_URL/api/cron/filing-reminders" \
-            -H "Authorization: Bearer $CRON_SECRET"
+          echo "$reply"
+      - name: Email an alert
+        if: failure()
+        uses: ./.github/actions/alert
+        with:
+          resend-api-key: ${{ secrets.ALERT_RESEND_API_KEY }}
+          to: ${{ secrets.ALERT_EMAIL_TO }}
+          from: ${{ vars.ALERT_EMAIL_FROM }}

@@ -1,0 +1,44 @@
+name: Email an alert
+description: >
+  Emails the alert address that a workflow failed, with the run link and any reasons the steps wrote
+  to $RUNNER_TEMP/alert.txt. Never includes secret values. Use with `if: failure()`.
+inputs:
+  resend-api-key:
+    description: ALERT_RESEND_API_KEY, a Resend key with sending access only
+    required: true
+  to:
+    description: ALERT_EMAIL_TO
+    required: true
+  from:
+    description: ALERT_EMAIL_FROM, an address on a domain verified in Resend
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        RESEND_API_KEY: ${{ inputs.resend-api-key }}
+        ALERT_TO: ${{ inputs.to }}
+        ALERT_FROM: ${{ inputs.from }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        WORKFLOW: ${{ github.workflow }}
+        JOB: ${{ github.job }}
+      run: |
+        if [ -z "$RESEND_API_KEY" ] || [ -z "$ALERT_TO" ] || [ -z "$ALERT_FROM" ]; then
+          echo "::warning title=No alert email::Set ALERT_RESEND_API_KEY and ALERT_EMAIL_TO (repository secrets) and ALERT_EMAIL_FROM (repository variable) to get alert emails. GitHub's own failure email still goes out."
+          exit 0
+        fi
+
+        when="$(TZ=Asia/Thimphu date '+%-d %B %Y at %H:%M')"
+        reasons="Open the run to see which step stopped."
+        if [ -s "$RUNNER_TEMP/alert.txt" ]; then reasons="$(cat "$RUNNER_TEMP/alert.txt")"; fi
+        text="$(printf '%s (%s) stopped on %s, Thimphu time.\n\n%s\n\nThe run: %s\n' "$WORKFLOW" "$JOB" "$when" "$reasons" "$RUN_URL")"
+
+        body="$(jq -n --arg from "$ALERT_FROM" --arg to "$ALERT_TO" --arg subject "DashTeam: ${WORKFLOW} failed" --arg text "$text" \
+          '{from: $from, to: [$to], subject: $subject, text: $text}')"
+        curl --fail-with-body --silent --show-error --max-time 30 \
+          -X POST https://api.resend.com/emails \
+          -H "Authorization: Bearer $RESEND_API_KEY" \
+          -H "Content-Type: application/json" \
+          --data "$body" > /dev/null
+        echo "Alert email sent."

@@ -61,10 +61,14 @@ Functions, triggers and grants go in a custom migration: `pnpm exec drizzle-kit 
 | | Database | App |
 | --- | --- | --- |
 | Local | Supabase in Docker | `pnpm dev` |
-| Preview (every PR) | Supabase project `dashteam-staging` | Vercel preview URL |
+| Staging | Supabase project `dashteam-staging` | Vercel preview (see below) |
 | Production | Supabase project `dashteam-prod` | Vercel production |
 
-Migrations reach staging and then production through `.github/workflows/migrate.yml` on every push to `main` that changes `supabase/migrations`. Production runs only if staging succeeds.
+Migrations reach staging and then production through `.github/workflows/migrate.yml` on every push to `main` that changes `supabase/migrations`. Production runs only if staging succeeds. Each job connects with its own environment's `MIGRATE_DATABASE_URL`, so it can reach one project and nothing else on the Supabase account.
+
+Vercel builds a preview only for branches other than `main`. While changes go straight to `main`, no staging app is deployed; staging is a database that migrations reach first.
+
+**A free Supabase project pauses after 7 days without activity.** Migrate then stops at "Check the staging database" with "The staging project looks paused". Restore it in Supabase (open the project, then Restore project), wait until it shows Healthy, and run Migrate again from Actions.
 
 ### Setting up a hosted Supabase project (once per project)
 
@@ -83,11 +87,21 @@ In the Supabase dashboard, region **Singapore**:
 ### Vercel
 
 1. Import the GitHub repo. Framework preset: Next.js. Every PR gets a preview deployment automatically
-2. Environment variables, from each Supabase project's **Connect** dialog:
-   - **Preview** → staging values; **Production** → production values
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `DATABASE_URL` (transaction pooler, port 6543)
-   - `SUPABASE_SECRET_KEY` (Project Settings → API Keys; server only)
-   - `FIELD_ENCRYPTION_KEY`: `openssl rand -base64 32`, a **different key for staging and production**
+2. Settings → Environment Variables. **Production** gets production values, **Preview** gets staging values:
+
+   | Name | What it is | Where it comes from |
+   | --- | --- | --- |
+   | `NEXT_PUBLIC_SUPABASE_URL` | The project's address (public) | Supabase → Connect |
+   | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key (public) | Supabase → Project Settings → API Keys |
+   | `DATABASE_URL` | **Transaction** pooler string, port 6543 | Supabase → Connect → Transaction pooler |
+   | `SUPABASE_SECRET_KEY` | Creates and removes logins. Server only | Supabase → Project Settings → API Keys |
+   | `FIELD_ENCRYPTION_KEY` | Encrypts TPN and bank account numbers | Generate: `openssl rand -base64 32`. A **different key for staging and production**; keep the production key in the password manager |
+   | `RESEND_API_KEY` | Sends payslips and other emails | Resend → API Keys, sending access only. Without it, production marks each email "not set up yet" |
+   | `EMAIL_FROM` | Sender, e.g. `Xceed Studio <payroll@your-domain>` | A domain verified in Resend |
+   | `APP_URL` | The app's address, for links in emails | Your Vercel domain. Without it, links point to localhost |
+   | `CRON_SECRET` | Lets the daily filing reminder in | Generate: `openssl rand -hex 32`. **Production only**, the same value as the GitHub secret |
+
+   Never set `ALLOW_TEST_CLOCK`, `FILING_TODAY` or `MAILPIT_URL` on a real deployment; they are for local development and tests.
 
 DashTeam uses no Vercel-only services (no Vercel Postgres, KV, Blob, Edge Config or Cron).
 
@@ -102,7 +116,7 @@ cp -r public .next/standalone/public 2>/dev/null || true
 PORT=3000 node .next/standalone/server.js
 ```
 
-Run that on any Node 24 host (a VPS, Fly.io, Render, Railway, or a container) with the same three environment variables, behind HTTPS. Scheduled jobs already run on GitHub Actions, not on the host.
+Run that on any Node 24 host (a VPS, Fly.io, Render, Railway, or a container) with the same environment variables as Vercel Production (the table above), behind HTTPS. Scheduled jobs already run on GitHub Actions, not on the host.
 
 ## GitHub
 
@@ -117,16 +131,26 @@ When a second person joins, add a branch ruleset on `main` that requires a pull 
 
 ### Secrets and variables
 
-Settings → Environments: create `staging`, `production` and `backup`. They keep each set of secrets separate.
+Settings → Environments: create `staging`, `production` and `backup`. They keep each set of secrets separate, and a job sees only its own environment's. CI needs none: it runs its own local Supabase.
 
-| Name | Kind | Used by |
-| --- | --- | --- |
-| `SUPABASE_ACCESS_TOKEN` | secret | migrate |
-| `STAGING_PROJECT_REF`, `STAGING_DB_PASSWORD` | secrets (staging) | migrate |
-| `PROD_PROJECT_REF`, `PROD_DB_PASSWORD` | secrets (production) | migrate |
-| `BACKUP_DATABASE_URL` | secret (backup) | backup. Production **session** pooler URL, port 5432 |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | secrets (backup) | backup |
-| `BACKUP_AGE_RECIPIENT` | variable (backup) | backup. The age **public** key only |
+Every workflow checks its settings first and names each missing one, then emails an alert (below) if anything fails.
+
+| Name | Where in GitHub | Used by | What it is, and where it comes from |
+| --- | --- | --- | --- |
+| `MIGRATE_DATABASE_URL` | `staging` environment secret | migrate | Staging **session** pooler string, port 5432 (Supabase → Connect → Session pooler) |
+| `MIGRATE_DATABASE_URL` | `production` environment secret | migrate | Production **session** pooler string, port 5432 |
+| `BACKUP_DATABASE_URL` | `backup` environment secret | backup | Production **session** pooler string, port 5432 |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `backup` environment secrets | backup | Cloudflare R2: the bucket and an API token limited to it |
+| `BACKUP_AGE_RECIPIENT` | `backup` environment **variable** | backup | The age **public** key only (see Backups) |
+| `APP_URL` | repository secret | filing reminders | The production app's address |
+| `CRON_SECRET` | repository secret | filing reminders | The same value as `CRON_SECRET` in Vercel Production |
+| `ALERT_RESEND_API_KEY` | repository secret | alerts | A Resend API key with sending access only |
+| `ALERT_EMAIL_TO` | repository secret | alerts | Who gets the alert emails |
+| `ALERT_EMAIL_FROM` | repository **variable** | alerts | Sender on a domain verified in Resend, e.g. `DashTeam alerts <alerts@your-domain>` |
+
+Session pooler strings work from GitHub's runners (IPv4); the direct connection is IPv6 only. The user in a session pooler string is `postgres.<project ref>`: copy it from Connect rather than typing it.
+
+**Alerts.** When migrate, the nightly backup or the filing reminder fails, the last step emails `ALERT_EMAIL_TO` with the reason and a link to the run. If the alert settings are missing it says so in the run, and GitHub's own failure email still goes out.
 
 ## Encryption key
 
@@ -144,4 +168,4 @@ One-time setup:
 
 1. `age-keygen -o dashteam-backup.key`. Store this file in the password manager and **nowhere else**. Put the printed `age1…` public key in the `BACKUP_AGE_RECIPIENT` variable
 2. Cloudflare R2: create a private bucket, add a lifecycle rule to delete objects under `daily/` after 35 days, and create an API token with Object Read & Write on that bucket only
-3. Run the workflow once by hand (Actions → Nightly backup → Run workflow) and check the file appears in R2
+3. Run the workflow once by hand (Actions → Nightly backup → Run workflow). It downloads what it uploaded and checks it, so a green run means the file is in R2 and whole
