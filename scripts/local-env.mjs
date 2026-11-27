@@ -21,8 +21,13 @@ const existingKey = existsSync(".env.local")
   ? /^FIELD_ENCRYPTION_KEY=(.+)$/m.exec(readFileSync(".env.local", "utf8"))?.[1]
   : undefined;
 
+// The Data API is off (supabase/config.toml), so `supabase status` no longer prints API_URL. Auth is
+// still served on the [api] port, so build the address from that.
+const apiPort = /^\[api\][^[]*?^port\s*=\s*(\d+)/ms.exec(readFileSync("supabase/config.toml", "utf8"))?.[1] ?? "54321";
+const supabaseUrl = status.API_URL ?? `http://127.0.0.1:${apiPort}`;
+
 const lines = [
-  `NEXT_PUBLIC_SUPABASE_URL=${status.API_URL}`,
+  `NEXT_PUBLIC_SUPABASE_URL=${supabaseUrl}`,
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${status.PUBLISHABLE_KEY ?? status.ANON_KEY}`,
   `DATABASE_URL=${status.DB_URL}`,
   `SUPABASE_SECRET_KEY=${status.SECRET_KEY ?? status.SERVICE_ROLE_KEY}`,

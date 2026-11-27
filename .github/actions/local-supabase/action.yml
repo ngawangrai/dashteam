@@ -10,8 +10,12 @@ runs:
       shell: bash
       run: |
         status="$(pnpm exec supabase status -o json)"
+        # The Data API is off (supabase/config.toml), so status no longer prints API_URL. Auth is still
+        # served on the [api] port, so build the address from that.
+        api_port="$(awk '/^\[api\]/ { in_api = 1; next } /^\[/ { in_api = 0 } in_api && /^port *=/ { print $3; exit }' supabase/config.toml)"
+        api_url="$(jq -r --arg fallback "http://127.0.0.1:${api_port:-54321}" '.API_URL // $fallback' <<<"$status")"
         {
-          echo "NEXT_PUBLIC_SUPABASE_URL=$(jq -r '.API_URL' <<<"$status")"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$api_url"
           echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(jq -r '.PUBLISHABLE_KEY // .ANON_KEY' <<<"$status")"
           echo "DATABASE_URL=$(jq -r '.DB_URL' <<<"$status")"
           echo "SUPABASE_SECRET_KEY=$(jq -r '.SECRET_KEY // .SERVICE_ROLE_KEY' <<<"$status")"

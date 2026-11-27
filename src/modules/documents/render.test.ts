@@ -94,7 +94,10 @@ describe("the salary certificate PDF", () => {
 describe("every document lays out the same, whatever was rendered before it", () => {
   // react-pdf keeps parsed fonts between renders; reused fonts once split "of" across two lines in a
   // certificate rendered after a payslip. Each render now loads its own.
-  const strip = (pdf: Buffer) => pdf.toString("latin1").replace(/\/CreationDate[^/]*|\/ModDate[^/]*|\/ID \[[^\]]*\]/g, "");
+  // The dates are their own objects ("17 0 obj (D:20261016080922Z)"), not only the /CreationDate key,
+  // so two renders a second apart used to differ here.
+  const strip = (pdf: Buffer) =>
+    pdf.toString("latin1").replace(/\/CreationDate[^/]*|\/ModDate[^/]*|\/ID \[[^\]]*\]|\(D:\d{14}[^)]*\)/g, "");
   const letter = certificateModel({
     person: { name: "Sonam Wangmo", jobTitle: "Product Designer", startDate: "2025-03-03" },
     terms: { effectiveFrom: "2025-03-01", employmentType: "full_time", basic: nu(40_000), allowances: nu(5_000) },
