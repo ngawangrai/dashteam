@@ -23,10 +23,27 @@ function weekAhead(monthsAhead: number) {
   return { monday: day(0), tuesday: day(1), wednesday: day(2), label, iso, monthsAhead };
 }
 
-// Months whose first fortnight has no seeded holiday on the days these tests book
-// (Dec 2026, Mar 2027, May 2027 as of October 2026).
-const offsetFor = (project: string) => ({ desktop: 2, "phone-light": 5, "phone-dark": 7 })[project] ?? 9;
-const holidayOffsetFor = (project: string) => ({ desktop: 8, "phone-light": 9, "phone-dark": 10 })[project] ?? 11;
+// The tests book days in the first fortnight of a month (Monday to the next Monday). Each device gets
+// months of its own whose fortnight has no holiday, read from the holidays table when the run starts.
+// Fixed offsets went stale as the calendar moved on and seeded holidays slid onto the booked days.
+const PROJECTS = ["desktop", "phone-light", "phone-dark"];
+let months: { leave: number; holiday: number; emails: number };
+
+async function monthsFor(project: string) {
+  const holidays = await db<{ start: string; end: string }[]>`
+    select start_date::text as start, end_date::text as end from public.holidays where name not like 'Test holiday %'`;
+  const free: number[] = [];
+  for (let ahead = 2; ahead <= 18 && free.length < 9; ahead += 1) {
+    const week = weekAhead(ahead);
+    const from = week.iso(week.monday);
+    const to = week.iso(new Date(week.monday.getTime() + 7 * 86_400_000));
+    if (!holidays.some((holiday) => holiday.start <= to && holiday.end >= from)) free.push(ahead);
+  }
+  if (free.length < 9) throw new Error("Not enough months without holidays in the next year and a half for the leave tests.");
+  // Four slots each for leave and holiday tests (the three devices, then anything else), one for emails.
+  const slot = PROJECTS.includes(project) ? PROJECTS.indexOf(project) : 3;
+  return { leave: free[slot] ?? 0, holiday: free[4 + slot] ?? 0, emails: free[8] ?? 0 };
+}
 
 async function pickDates(page: Page | Locator, monthsAhead: number, first: string, last: string) {
   for (let i = 0; i < monthsAhead; i += 1) await page.getByRole("button", { name: "Next month" }).click();
@@ -36,13 +53,14 @@ async function pickDates(page: Page | Locator, monthsAhead: number, first: strin
 
 test.describe.configure({ mode: "serial" });
 
-test.beforeAll(async () => {
+test.beforeAll(async ({}, testInfo) => {
   // A clean slate for the seeded employee's leave, so the run can be repeated without a reset.
   await db`delete from public.leave_requests where person_id = ${SONAM}`;
+  months = await monthsFor(testInfo.project.name);
 });
 
 test("an employee requests leave in under 15 seconds and sees the balance before sending", async ({ page }, testInfo) => {
-  const week = weekAhead(offsetFor(testInfo.project.name));
+  const week = weekAhead(months.leave);
   await signIn(page, EMPLOYEE);
   await expect(page).toHaveURL(/\/$/);
   await page.goto("/leave");
@@ -83,8 +101,8 @@ test("an admin approves from one inbox, undoes it, and approves again", async ({
   await expect(card).toHaveCount(0);
 });
 
-test("the employee sees the decision, and a declined request shows the admin's note", async ({ page }, testInfo) => {
-  const week = weekAhead(offsetFor(testInfo.project.name));
+test("the employee sees the decision, and a declined request shows the admin's note", async ({ page }) => {
+  const week = weekAhead(months.leave);
   await signIn(page, EMPLOYEE);
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("link", { name: /Leave/ }).filter({ hasText: "Leave" }).first()).toContainText("New decision on your leave");
@@ -113,8 +131,8 @@ test("the employee sees the decision, and a declined request shows the admin's n
   await expect(page.getByText("We need you for the launch that day")).toBeVisible();
 });
 
-test("an employee cancels a pending request, and can undo the cancel", async ({ page }, testInfo) => {
-  const week = weekAhead(offsetFor(testInfo.project.name));
+test("an employee cancels a pending request, and can undo the cancel", async ({ page }) => {
+  const week = weekAhead(months.leave);
   await signIn(page, EMPLOYEE);
   await page.goto("/leave");
   await page.getByRole("button", { name: "Request leave" }).first().click();
@@ -135,7 +153,7 @@ test("an employee cancels a pending request, and can undo the cancel", async ({ 
 });
 
 test("a holiday inside a request is not counted", async ({ page }, testInfo) => {
-  const week = weekAhead(holidayOffsetFor(testInfo.project.name));
+  const week = weekAhead(months.holiday);
   const name = `Test holiday ${testInfo.project.name}`;
   // Clear anything an interrupted earlier run left behind.
   await db`delete from public.holidays where name = ${name}`;
@@ -163,7 +181,7 @@ test("a holiday inside a request is not counted", async ({ page }, testInfo) => 
 });
 
 test("Who's out shows names and dates to everyone, and the kind of leave only to admins", async ({ page }, testInfo) => {
-  const week = weekAhead(offsetFor(testInfo.project.name));
+  const week = weekAhead(months.leave);
   const month = week.iso(week.monday).slice(0, 7);
   const [pema] = await db`insert into public.people (full_name, email, start_date)
                           values ('Pema Choden', ${`pema.${testInfo.project.name}.${Date.now()}@dashteam.local`}, '2025-01-06') returning id`;
@@ -212,7 +230,7 @@ test("leave emails: admins hear about a request, the person hears the decision, 
   // Emails don't depend on the device, and each waits out the Undo window, so this runs once.
   test.skip(testInfo.project.name !== "desktop", "Runs on the laptop project only.");
   test.setTimeout(120_000);
-  const week = weekAhead(14);
+  const week = weekAhead(months.emails);
   const tuesday = new Date(week.monday.getTime() + 86_400_000);
   const thursday = new Date(week.monday.getTime() + 3 * 86_400_000);
   const short = (date: Date) => `${DAYS[date.getUTCDay()]?.slice(0, 3)} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]?.slice(0, 3)}`;
