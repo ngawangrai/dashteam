@@ -5,7 +5,10 @@
 project_id = "dashteam"
 
 [api]
-enabled = true
+# Off: DashTeam never uses the Data API (REST or GraphQL). Every read and write goes through the
+# server, which runs it as the signed-in person under RLS. Leaving it on would let anyone holding a
+# session token query tables directly, past the app's own checks. Auth doesn't need it.
+enabled = false
 # Port to use for the API URL.
 port = 54321
 # Schemas to expose in your API. Tables, views and stored procedures in this schema will get API

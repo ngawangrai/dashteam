@@ -1,0 +1,5 @@
+ALTER TABLE "pay_statements" ADD CONSTRAINT "pay_statements_reference_format" CHECK ("pay_statements"."reference" ~ '^XS-PS-[0-9]{4}-[0-9]{4,6}$');--> statement-breakpoint
+ALTER TABLE "people" ADD CONSTRAINT "people_bank_account_format" CHECK ("people"."bank_account_ciphertext" is null or ("people"."bank_account_ciphertext" ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and "people"."bank_account_last4" ~ '^[0-9]{4}$'));--> statement-breakpoint
+ALTER TABLE "people" ADD CONSTRAINT "people_tpn_format" CHECK ("people"."tpn_ciphertext" is null or ("people"."tpn_ciphertext" ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and "people"."tpn_last4" ~ '^[A-Z0-9]{4}$'));--> statement-breakpoint
+ALTER TABLE "profile_change_requests" ADD CONSTRAINT "profile_change_requests_bank_account_format" CHECK ("profile_change_requests"."bank_account_ciphertext" is null or ("profile_change_requests"."bank_account_ciphertext" ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and "profile_change_requests"."bank_account_last4" ~ '^[0-9]{4}$'));--> statement-breakpoint
+ALTER TABLE "salary_certificates" ADD CONSTRAINT "salary_certificates_reference_format" CHECK ("salary_certificates"."reference" ~ '^XS-SC-[0-9]{4}-[0-9]{3,6}$');

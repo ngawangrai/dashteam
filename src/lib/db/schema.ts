@@ -137,6 +137,15 @@ export const people = pgTable(
       sql`(${table.bankAccountCiphertext} is null) = (${table.bankAccountLast4} is null)`,
     ),
     check("people_tpn_pair", sql`(${table.tpnCiphertext} is null) = (${table.tpnLast4} is null)`),
+    // Only the app writes these, but a malformed value would break the bank list for everyone.
+    check(
+      "people_bank_account_format",
+      sql`${table.bankAccountCiphertext} is null or (${table.bankAccountCiphertext} ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and ${table.bankAccountLast4} ~ '^[0-9]{4}$')`,
+    ),
+    check(
+      "people_tpn_format",
+      sql`${table.tpnCiphertext} is null or (${table.tpnCiphertext} ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and ${table.tpnLast4} ~ '^[A-Z0-9]{4}$')`,
+    ),
     pgPolicy("people_select_own_or_admin", {
       for: "select",
       to: authenticatedRole,
@@ -229,6 +238,11 @@ export const profileChangeRequests = pgTable(
     check(
       "profile_change_requests_bank_account_pair",
       sql`(${table.bankAccountCiphertext} is null) = (${table.bankAccountLast4} is null)`,
+    ),
+    // An employee writes this row, and approval copies it onto the person as it is.
+    check(
+      "profile_change_requests_bank_account_format",
+      sql`${table.bankAccountCiphertext} is null or (${table.bankAccountCiphertext} ~ '^v[0-9]+:[A-Za-z0-9+/=:]+$' and ${table.bankAccountLast4} ~ '^[0-9]{4}$')`,
     ),
     pgPolicy("profile_change_requests_select_own_or_admin", {
       for: "select",
@@ -867,6 +881,8 @@ export const payStatements = pgTable(
     // The same range on the same day is the same statement: it's made once.
     unique("pay_statements_person_range_day").on(table.personId, table.fromMonth, table.toMonth, table.issuedOn),
     check("pay_statements_range", sql`${table.fromMonth} <= ${table.toMonth}`),
+    // next_document_number reads the number back out of the reference.
+    check("pay_statements_reference_format", sql`${table.reference} ~ '^XS-PS-[0-9]{4}-[0-9]{4,6}$'`),
     pgPolicy("pay_statements_select_own_or_admin", {
       for: "select",
       to: authenticatedRole,
@@ -964,6 +980,7 @@ export const salaryCertificates = pgTable(
   (table) => [
     unique("salary_certificates_request").on(table.requestId),
     unique("salary_certificates_reference").on(table.reference),
+    check("salary_certificates_reference_format", sql`${table.reference} ~ '^XS-SC-[0-9]{4}-[0-9]{3,6}$'`),
     pgPolicy("salary_certificates_select_own_or_admin", {
       for: "select",
       to: authenticatedRole,
