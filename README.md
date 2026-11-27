@@ -61,14 +61,14 @@ Functions, triggers and grants go in a custom migration: `pnpm exec drizzle-kit 
 | | Database | App |
 | --- | --- | --- |
 | Local | Supabase in Docker | `pnpm dev` |
-| Staging | Supabase project `dashteam-staging` | Vercel preview (see below) |
+| CI | Supabase in Docker, started fresh for each job | `pnpm build && pnpm start` for the e2e tests |
 | Production | Supabase project `dashteam-prod` | Vercel production |
 
-Migrations reach staging and then production through `.github/workflows/migrate.yml` on every push to `main` that changes `supabase/migrations`. Production runs only if staging succeeds. Each job connects with its own environment's `MIGRATE_DATABASE_URL`, so it can reach one project and nothing else on the Supabase account.
+There is no hosted staging. Changes are proved locally and in CI, then reach production.
 
-Vercel builds a preview only for branches other than `main`. While changes go straight to `main`, no staging app is deployed; staging is a database that migrations reach first.
+Migrations reach production through `.github/workflows/migrate.yml` on every push to `main` that changes `supabase/migrations`. It first runs the nightly backup workflow, saved under `pre-migration/` with the commit in its name and verified, and migrates only if that succeeded. The job connects with the `production` environment's `MIGRATE_DATABASE_URL`, so it reaches that one project and nothing else on the Supabase account.
 
-**A free Supabase project pauses after 7 days without activity.** Migrate then stops at "Check the staging database" with "The staging project looks paused". Restore it in Supabase (open the project, then Restore project), wait until it shows Healthy, and run Migrate again from Actions.
+**A free Supabase project pauses after 7 days without activity.** Backup and Migrate then stop at "Check the production database" with "The production project looks paused". Restore it in Supabase (open the project, then Restore project), wait until it shows Healthy, and run the workflow again from Actions.
 
 ### Setting up a hosted Supabase project (once per project)
 
@@ -86,8 +86,8 @@ In the Supabase dashboard, region **Singapore**:
 
 ### Vercel
 
-1. Import the GitHub repo. Framework preset: Next.js. Every PR gets a preview deployment automatically
-2. Settings → Environment Variables. **Production** gets production values, **Preview** gets staging values:
+1. Import the GitHub repo. Framework preset: Next.js
+2. Settings → Environment Variables, for **Production only**. Preview and Development get none: a preview must never reach production data or services, so delete any variables there:
 
    | Name | What it is | Where it comes from |
    | --- | --- | --- |
@@ -95,7 +95,7 @@ In the Supabase dashboard, region **Singapore**:
    | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key (public) | Supabase → Project Settings → API Keys |
    | `DATABASE_URL` | **Transaction** pooler string, port 6543 | Supabase → Connect → Transaction pooler |
    | `SUPABASE_SECRET_KEY` | Creates and removes logins. Server only | Supabase → Project Settings → API Keys |
-   | `FIELD_ENCRYPTION_KEY` | Encrypts TPN and bank account numbers | Generate: `openssl rand -base64 32`. A **different key for staging and production**; keep the production key in the password manager |
+   | `FIELD_ENCRYPTION_KEY` | Encrypts TPN and bank account numbers | Generate: `openssl rand -base64 32`. A different key from your local one; keep the production key in the password manager |
    | `RESEND_API_KEY` | Sends payslips and other emails | Resend → API Keys, sending access only. Without it, production marks each email "not set up yet" |
    | `EMAIL_FROM` | Sender, e.g. `Xceed Studio <payroll@your-domain>` | A domain verified in Resend |
    | `APP_URL` | The app's address, for links in emails | Your Vercel domain. Without it, links point to localhost |
@@ -131,14 +131,13 @@ When a second person joins, add a branch ruleset on `main` that requires a pull 
 
 ### Secrets and variables
 
-Settings → Environments: create `staging`, `production` and `backup`. They keep each set of secrets separate, and a job sees only its own environment's. CI needs none: it runs its own local Supabase.
+Settings → Environments: create `production` and `backup`. They keep each set of secrets separate, and a job sees only its own environment's. CI needs none: it runs its own local Supabase.
 
 Every workflow checks its settings first and names each missing one, then emails an alert (below) if anything fails.
 
 | Name | Where in GitHub | Used by | What it is, and where it comes from |
 | --- | --- | --- | --- |
-| `MIGRATE_DATABASE_URL` | `staging` environment secret | migrate | Staging **session** pooler string, port 5432 (Supabase → Connect → Session pooler) |
-| `MIGRATE_DATABASE_URL` | `production` environment secret | migrate | Production **session** pooler string, port 5432 |
+| `MIGRATE_DATABASE_URL` | `production` environment secret | migrate | Production **session** pooler string, port 5432 (Supabase → Connect → Session pooler). The same string as `BACKUP_DATABASE_URL`, kept in its own environment |
 | `BACKUP_DATABASE_URL` | `backup` environment secret | backup | Production **session** pooler string, port 5432 |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | `backup` environment secrets | backup | Cloudflare R2: the bucket and an API token limited to it |
 | `BACKUP_AGE_RECIPIENT` | `backup` environment **variable** | backup | The age **public** key only (see Backups) |

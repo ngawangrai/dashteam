@@ -7,14 +7,24 @@
 #   BACKUP_AGE_RECIPIENT   age public key (age1...). The private key is kept offline, never in GitHub.
 #   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
 # Optional:
+#   BACKUP_REASON          nightly (default) or pre-migration, when Migrate runs it before a migration
 #   R2_ENDPOINT            another S3 endpoint, only for testing this script against a local store
 set -euo pipefail
 
 : "${BACKUP_DATABASE_URL:?missing}" "${BACKUP_AGE_RECIPIENT:?missing}"
 : "${R2_ACCOUNT_ID:?missing}" "${R2_ACCESS_KEY_ID:?missing}" "${R2_SECRET_ACCESS_KEY:?missing}" "${R2_BUCKET:?missing}"
 
+reason="${BACKUP_REASON:-nightly}"
 day="$(TZ=Asia/Thimphu date +%F)"
-name="dashteam-${day}.dump.age"
+case "$reason" in
+  nightly) name="dashteam-${day}.dump.age" ;;
+  # Its own name, so it never replaces that night's file, and the commit it came before.
+  pre-migration)
+    commit="${GITHUB_SHA:-local}"
+    name="dashteam-${day}-$(TZ=Asia/Thimphu date +%H%M)-${commit:0:7}.dump.age"
+    ;;
+  *) echo "::error title=Backup::BACKUP_REASON must be nightly or pre-migration, not ${reason}."; exit 1 ;;
+esac
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
@@ -88,12 +98,17 @@ verify() {
     || fail "The $1 backup in R2 isn't an age-encrypted file."
 }
 
-# daily/ expires after 35 days (bucket lifecycle rule); monthly/ is kept for good.
-upload daily
-verify daily
-if [ "$(TZ=Asia/Thimphu date +%d)" = "01" ]; then
-  upload monthly
-  verify monthly
+# daily/ expires after 35 days (bucket lifecycle rule); monthly/ and pre-migration/ are kept for good.
+if [ "$reason" = "pre-migration" ]; then
+  upload pre-migration
+  verify pre-migration
+else
+  upload daily
+  verify daily
+  if [ "$(TZ=Asia/Thimphu date +%d)" = "01" ]; then
+    upload monthly
+    verify monthly
+  fi
 fi
 
 echo "Uploaded and verified ${name}: ${size} bytes, data for ${tables} tables."

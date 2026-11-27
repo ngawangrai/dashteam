@@ -32,8 +32,8 @@ describe("parseTarget", () => {
 
 describe("messages", () => {
   it("tells you how to restore a paused project", () => {
-    expect(pausedMessage("staging")).toBe(
-      "The staging project looks paused. Free Supabase projects pause after 7 days without activity. Restore it in Supabase (open the project, then Restore project), wait until it shows Healthy, then run this workflow again.",
+    expect(pausedMessage("production")).toBe(
+      "The production project looks paused. Free Supabase projects pause after 7 days without activity. Restore it in Supabase (open the project, then Restore project), wait until it shows Healthy, then run this workflow again.",
     );
   });
 

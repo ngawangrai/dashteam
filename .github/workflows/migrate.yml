@@ -1,8 +1,9 @@
 name: Migrate
 
-# Applies new migrations on push to main: staging first, and production only if staging succeeds.
-# Each environment holds its own MIGRATE_DATABASE_URL (that project's session pooler string), so a
-# job can reach one project and nothing else on the Supabase account.
+# Applies new migrations to production on push to main. There is no hosted staging: a fresh backup
+# runs first (the nightly backup workflow, saved under pre-migration/ and verified), and production
+# is migrated only if it succeeded. The production environment holds MIGRATE_DATABASE_URL, so this
+# job reaches that one project and nothing else on the Supabase account.
 on:
   push:
     branches: [main]
@@ -17,37 +18,16 @@ permissions:
   contents: read
 
 jobs:
-  staging:
-    runs-on: ubuntu-latest
-    environment: staging
-    timeout-minutes: 10
-    env:
-      MIGRATE_DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check required settings
-        run: scripts/ci/require-secrets.sh "Settings → Environments → staging → Environment secrets" MIGRATE_DATABASE_URL
-      - uses: ./.github/actions/setup
-      # A paused free project shows up here by name, not as a vague connection failure further on.
-      - name: Check the staging database
-        run: node scripts/ci/check-database.ts MIGRATE_DATABASE_URL staging
-      - name: Show migrations waiting to apply
-        run: pnpm exec supabase migration list --db-url "$MIGRATE_DATABASE_URL"
-      # No seed: demo data never reaches a hosted project.
-      - name: Apply migrations
-        run: pnpm exec supabase db push --db-url "$MIGRATE_DATABASE_URL" --yes
-      - name: Email an alert
-        if: failure()
-        uses: ./.github/actions/alert
-        with:
-          resend-api-key: ${{ secrets.ALERT_RESEND_API_KEY }}
-          to: ${{ secrets.ALERT_EMAIL_TO }}
-          from: ${{ vars.ALERT_EMAIL_FROM }}
+  backup:
+    uses: ./.github/workflows/backup.yml
+    with:
+      reason: pre-migration
+    # The backup job still reads its own secrets from the backup environment.
+    secrets: inherit
 
   production:
-    needs: staging
+    needs: backup
     runs-on: ubuntu-latest
-    # Runs only after staging succeeds, so a broken migration never reaches salary data.
     environment: production
     timeout-minutes: 10
     env:
@@ -57,10 +37,12 @@ jobs:
       - name: Check required settings
         run: scripts/ci/require-secrets.sh "Settings → Environments → production → Environment secrets" MIGRATE_DATABASE_URL
       - uses: ./.github/actions/setup
+      # A paused free project shows up here by name, not as a vague connection failure further on.
       - name: Check the production database
         run: node scripts/ci/check-database.ts MIGRATE_DATABASE_URL production
       - name: Show migrations waiting to apply
         run: pnpm exec supabase migration list --db-url "$MIGRATE_DATABASE_URL"
+      # No seed: demo data never reaches production.
       - name: Apply migrations
         run: pnpm exec supabase db push --db-url "$MIGRATE_DATABASE_URL" --yes
       - name: Email an alert

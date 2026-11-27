@@ -7,7 +7,9 @@
 3. Streamed straight into `age`, encrypted to a public key. GitHub never holds the key that decrypts it.
    On the way past, `pg_restore --list` reads the dump's table of contents (names only, no data); the run
    stops if there is no data for `payroll_snapshots`, `audit_log`, `people` or `auth.users`
-4. Uploaded with a `.sha256` checksum to the private R2 bucket: `daily/` (kept 35 days by a lifecycle rule) and, on the 1st, `monthly/` (kept for good)
+4. Uploaded with a `.sha256` checksum to the private R2 bucket: `daily/` (kept 35 days by a lifecycle rule) and, on the 1st, `monthly/` (kept for good).
+   Before every production migration, Migrate runs this same workflow first and saves to
+   `pre-migration/dashteam-<date>-<time>-<commit>.dump.age` (kept for good); it migrates only if the backup succeeded
 5. Downloaded again from R2 and checked: the checksum in R2 must be the one made before upload, the file must
    match it, and it must be an age file. Anything else fails the run
 
