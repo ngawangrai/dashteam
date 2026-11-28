@@ -13,7 +13,7 @@ You need:
 ```bash
 pnpm install
 pnpm db:start      # first run downloads the Supabase images (a few minutes); applies migrations and seed data
-pnpm env:local     # writes .env.local from the running stack
+pnpm env:local     # writes .env.local from the running stack, adding only what's missing
 pnpm dev           # http://localhost:3000
 ```
 
@@ -96,12 +96,16 @@ In the Supabase dashboard, region **Singapore**:
    | `DATABASE_URL` | **Transaction** pooler string, port 6543 | Supabase → Connect → Transaction pooler |
    | `SUPABASE_SECRET_KEY` | Creates and removes logins. Server only | Supabase → Project Settings → API Keys |
    | `FIELD_ENCRYPTION_KEY` | Encrypts TPN and bank account numbers | Generate: `openssl rand -base64 32`. A different key from your local one; keep the production key in the password manager |
-   | `RESEND_API_KEY` | Sends payslips and other emails | Resend → API Keys, sending access only. Without it, production marks each email "not set up yet" |
+   | `RESEND_API_KEY` | Sends payslips and other emails | Resend → API Keys, sending access only |
    | `EMAIL_FROM` | Sender, e.g. `Xceed Studio <payroll@your-domain>` | A domain verified in Resend |
    | `APP_URL` | The app's address, for links in emails | Your Vercel domain. Without it, links point to localhost |
-   | `CRON_SECRET` | Lets the daily filing reminder in | Generate: `openssl rand -hex 32`. **Production only**, the same value as the GitHub secret |
+   | `CRON_SECRET` | Lets the daily filing reminder in | Generate: `openssl rand -hex 32`. The same value as the GitHub secret |
+
+   Every one is required. There are no defaults: a missing setting stops the build or the server at start with its name ("DashTeam can't start. These settings are missing or wrong: APP_URL."). Email needs exactly one of `RESEND_API_KEY` (production) or `MAILPIT_URL` (local and CI).
 
    Never set `ALLOW_TEST_CLOCK`, `FILING_TODAY` or `MAILPIT_URL` on a real deployment; they are for local development and tests.
+
+3. **Previews never run.** The app refuses to build or start when Vercel says it's a preview (`VERCEL_ENV=preview`), even with every setting in place, because there is no staging database and a preview must never reach production. To avoid a red preview each time a branch is pushed, switch preview builds off: Settings → Git → Ignored Build Step → "Only build production"
 
 DashTeam uses no Vercel-only services (no Vercel Postgres, KV, Blob, Edge Config or Cron).
 

@@ -22,4 +22,8 @@ runs:
           echo "FIELD_ENCRYPTION_KEY=$(openssl rand -base64 32)"
           echo "MAILPIT_URL=$(jq -r '.MAILPIT_URL // .INBUCKET_URL' <<<"$status")"
           echo "APP_URL=http://localhost:3000"
+          # Every setting is required (src/lib/env/schema.ts). The e2e server gets Playwright's own
+          # cron secret; this one only lets the build load its settings.
+          echo "EMAIL_FROM=Xceed Studio <payroll@dashteam.local>"
+          echo "CRON_SECRET=$(openssl rand -hex 32)"
         } >> "$GITHUB_ENV"
